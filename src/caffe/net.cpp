@@ -821,6 +821,7 @@ void Net::ReduceAndUpdate(int type_id) {
   if (Caffe::solver_count() > 1 && reduce_buckets_ > 0) {
     bucket_size = align_up<6>(learnable_space_size_[type_id] / reduce_buckets_);
   }
+  bucket_size = 0UL;
   std::set<int> au_ids;
 #else
   void* handle = nullptr;
@@ -841,6 +842,7 @@ void Net::ReduceAndUpdate(int type_id) {
       if (Caffe::solver_count() > 1) {
 #ifndef CPU_ONLY
         if (reduce_buckets_ == 0) {  // no bucketing
+          LOG(INFO) << "--- Start to reduce, reduce type: " << type_id << ", param: " << param_id;
           Reduce(type_id, param_id);
           if (solver_->stop_reducing_requested(type_id)) {
             break;
@@ -878,6 +880,7 @@ void Net::ReduceAndUpdate(int type_id) {
           }
 #endif
           CHECK_EQ((int) learnable_params_[id_from]->diff_type(), learnable_types_[type_id]);
+          LOG(INFO) << "--- Start to reduce, reduce size: " << received_count << ", rank: " << solver_rank_ << ", type: " << Type_Name(learnable_params_[id_from]->diff_type()) << ", bucket_size: " << bucket_size << ", reduce_buckets: " << reduce_buckets_;
           ReduceBucket(type_id, received_count, learnable_params_[id_from]->diff_type(),
               learnable_params_ptrs_[type_id][id_from]);
           if (solver_->stop_reducing_requested(type_id)) {
@@ -903,6 +906,21 @@ void Net::ReduceAndUpdate(int type_id) {
       solver_->iteration_complete_signal(type_id);
     }
 #endif
+  }
+  DLOG(INFO) << "[" << Caffe::current_device() << "] Leaving ReduceAndUpdate thread";
+}
+
+void Net::ReduceAndUpdateDist(int type_id) {
+  shared_ptr<CuBLASHandle> cublas_phandle = Caffe::cublas_phandle();
+  cublasHandle_t handle = cublas_phandle->get();
+  while (!solver_->stop_reducing_requested(type_id)) {
+      const std::pair<int, size_t>& param = dist_queue_->pop();
+      int id_from = param.first;
+      size_t count = param.second;
+      if (id_from != HOLD_ON_REDUCE) {
+          ReduceBucket(type_id, count, learnable_params_[id_from]->diff_type(),
+                  learnable_params_ptrs_[type_id][id_from]);
+      }
   }
   DLOG(INFO) << "[" << Caffe::current_device() << "] Leaving ReduceAndUpdate thread";
 }
@@ -1390,6 +1408,7 @@ void Net::InitializeLearnableDiffSpace(int type_id) {
         if (param_owners_[lip] < 0) {
           const int param_id = learnable_param_ids_[lip];
           if (learnable_params_[param_id]->diff_type() == t) {
+            LOG(INFO) << "--- param_id: " << param_id << ", lp_aligned_count: " << lp_aligned_count(param_id) << ", lpsize: " << lp_size(param_id);
             learnable_space_size_[type_id] += lp_aligned_count(param_id) * lp_size(param_id);
           }
         }

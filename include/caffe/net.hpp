@@ -91,6 +91,7 @@ class Net {
    */
   void Reshape();
   void ReduceAndUpdate(int type_id);
+  void ReduceAndUpdateDist(int type_id);
 
   float ForwardBackward(bool apply_update = true);
 
@@ -185,6 +186,17 @@ class Net {
   const vector<shared_ptr<Blob>>& learnable_params_mapped() const {
     return learnable_params_mapped_;
   }
+
+  // Add by shshi
+  const size_t learnable_space_size(int type_id) { 
+      return learnable_space_size_[type_id];
+  }
+
+  const vector<void *>& learnable_params_ptr(int type_id) {
+      return learnable_params_ptrs_[type_id];
+  }
+
+  // Added
 
   shared_ptr<TBlob<float>> lars_learnable_param(int param_id) {
     lars_learnable_params_.resize(learnable_params_.size());
@@ -291,6 +303,10 @@ class Net {
 
   void update_grad_scale();
 
+  void set_dist_queue(BlockingQueue<std::pair<int, size_t>> *p) {
+      dist_queue_ = p;
+  }
+
   std::string print_current_device() const {
 #ifndef CPU_ONLY
     std::ostringstream os;
@@ -331,6 +347,7 @@ class Net {
   size_t received_contiguous_count(int type_id, const std::set<int>& au_ids, int& from);
 #endif
 
+ public:
   size_t lp_aligned_count(int id) const {
     return align_up<6>((size_t)learnable_params_[id]->count());
   }
@@ -428,6 +445,7 @@ class Net {
   Solver* solver_;
   size_t solver_rank_;
   BlockingQueue<int> reduction_queue_[2];
+  BlockingQueue<std::pair<int, size_t>> *dist_queue_;
   Flag* solver_init_flag_;
   Flag* solver_iter0_flag_;
   vector<Flag*> layer_inititialized_flags_;
@@ -440,10 +458,12 @@ class Net {
 
   static constexpr float GRAD_FACTOR = 1.E6F;
 
-  static constexpr int END_OF_ITERATION = -1;
-  static constexpr int END_OF_TRAIN = -2;
 
   DISABLE_COPY_MOVE_AND_ASSIGN(Net);
+ public:
+  static constexpr int END_OF_ITERATION = -1;
+  static constexpr int END_OF_TRAIN = -2;
+  static constexpr int HOLD_ON_REDUCE = -3;
 };
 
 }  // namespace caffe
