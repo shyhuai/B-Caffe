@@ -227,7 +227,7 @@ int train() {
     CopyLayers(solver.get(), FLAGS_weights);
   }
 
-  if (world_size <= 1) {
+  if (world_size <= 4) {
       if (gpus.size() > 1) {
           caffe::P2PManager p2p_mgr(solver, gpus.size(), solver->param());
           p2p_mgr.Run(gpus);
