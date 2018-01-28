@@ -439,7 +439,13 @@ endif
 INCLUDE_DIRS += $(BLAS_INCLUDE)
 LIBRARY_DIRS += $(BLAS_LIB)
 
-LIBRARY_DIRS += $(LIB_BUILD_DIR)
+# MPI for distributed version
+#ifeq ($(USE_MPI), 1)
+INCLUDE_DIRS += $(MPI_ROOT)/include
+LIBRARY_DIRS += $(MPI_ROOT)/lib
+#endif
+
+LIBRARY_DIRS += /home/comp/csshshi/repositories/nvcaffe-dist/build/lib $(LIB_BUILD_DIR)
 
 # Automatic dependency generation (nvcc is handled separately)
 CXXFLAGS += -MMD -MP

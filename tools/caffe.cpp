@@ -7,6 +7,7 @@ namespace bp = boost::python;
 #include <glog/logging.h>
 #include <map>
 #include <boost/algorithm/string.hpp>
+#include <mpi.h>
 
 #include "caffe/caffe.hpp"
 #include "caffe/util/signal_handler.h"
