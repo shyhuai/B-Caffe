@@ -396,6 +396,8 @@ void Solver::Finalize() {
   }
 }
 
+  //reduce_thread0_.reset(new boost::thread(&Solver::Reduce, this, callback(),
+  //    Caffe::current_device(), mode, random_seed, solver_count, root_solver, 0));
 void Solver::Reduce(Callback* callback, int device, Caffe::Brew mode, uint64_t random_seed,
     int solver_count, bool root_solver, int type_id) {
   set_callback(callback);

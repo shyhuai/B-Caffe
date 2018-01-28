@@ -289,6 +289,19 @@ ifeq ($(LINUX), 1)
 	VERSIONFLAGS += -Wl,-soname,$(DYNAMIC_SONAME_SHORT) -Wl,-rpath,$(ORIGIN)/../lib
 endif
 
+ifeq ($(USE_MPI), 1)
+	CXX := $(MPI_ROOT)/bin/mpicxx
+	GCCVERSION := $(shell $(CXX) -dumpversion | cut -f1,2 -d.)
+	# older versions of gcc are too dumb to build boost with -Wuninitalized
+	ifeq ($(shell echo | awk '{exit $(GCCVERSION) < 4.6;}'), 1)
+		WARNINGS += -Wno-uninitialized
+	endif
+	# boost::thread is reasonably called boost_thread (compare OS X)
+	# We will also explicitly add stdc++ to the link target.
+	LIBRARIES += boost_thread stdc++
+	VERSIONFLAGS += -Wl,-soname,$(DYNAMIC_SONAME_SHORT) -Wl,-rpath,$(ORIGIN)/../lib
+endif
+
 # OS X:
 # clang++ instead of g++
 # libstdc++ for NVCC compatibility on OS X >= 10.9 with CUDA < 7.0
@@ -332,6 +345,8 @@ ifneq (,$(findstring clang++,$(CXX)))
 	STATIC_LINK_COMMAND := -Wl,-force_load $(STATIC_NAME)
 else ifneq (,$(findstring g++,$(CXX)))
 	STATIC_LINK_COMMAND := -Wl,--whole-archive $(STATIC_NAME) -Wl,--no-whole-archive
+else ifneq (,$(findstring mpicxx,$(CXX)))
+	STATIC_LINK_COMMAND := -Wl,--whole-archive $(STATIC_NAME) -Wl,--no-whole-archive
 else
   # The following line must not be indented with a tab, since we are not inside a target
   $(error Cannot static link with the $(CXX) compiler)
@@ -363,6 +378,15 @@ ifeq ($(USE_NCCL), 1)
 	INCLUDE_DIRS += $(NCCL_ROOT)/build/include
 	LIBRARY_DIRS += $(NCCL_ROOT)/build/lib
 endif
+
+
+# MPI for distributed version
+ifeq ($(USE_MPI), 1)
+	INCLUDE_DIRS += $(MPI_ROOT)/include
+	LIBRARY_DIRS += $(MPI_ROOT)/lib
+	LIBRARIES += mpi 
+endif
+
 
 # configure IO libraries
 ifeq ($(USE_OPENCV), 1)

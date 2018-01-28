@@ -92,6 +92,7 @@ bool BlockingQueue<T>::nonblocking_size(size_t* size) const {
 }
 
 template class BlockingQueue<int>;
+template class BlockingQueue<std::pair<int, size_t>>;
 template class BlockingQueue<shared_ptr<Batch>>;
 template class BlockingQueue<shared_ptr<Datum>>;
 template class BlockingQueue<P2PSync*>;

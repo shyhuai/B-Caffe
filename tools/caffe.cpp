@@ -11,6 +11,7 @@ namespace bp = boost::python;
 
 #include "caffe/caffe.hpp"
 #include "caffe/util/signal_handler.h"
+#include "caffe/distributed.hpp"
 
 
 using caffe::TBlob;
@@ -23,6 +24,7 @@ using caffe::shared_ptr;
 using caffe::string;
 using caffe::Timer;
 using caffe::vector;
+using caffe::DistManager;
 using std::ostringstream;
 
 DEFINE_string(gpu, "",
@@ -177,6 +179,9 @@ int train() {
 #ifndef CPU_ONLY
   caffe::GPUMemory::Scope gpu_memory_scope(gpus);
 #endif
+  int world_size;
+  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+  LOG(INFO) << "World size: " << world_size;
   // Set mode and device id[s]
   if (gpus.size() == 0) {
     LOG(INFO) << "Use CPU.";
@@ -206,7 +211,7 @@ int train() {
     Caffe::set_gpus(gpus);
     Caffe::set_solver_count(gpus.size());
     CHECK_EQ(gpus.size(), Caffe::solver_count());
-  }
+  } 
 
   caffe::SignalHandler signal_handler(
         GetRequestedAction(FLAGS_sigint_effect),
@@ -222,21 +227,29 @@ int train() {
     CopyLayers(solver.get(), FLAGS_weights);
   }
 
-  if (gpus.size() > 1) {
-    caffe::P2PManager p2p_mgr(solver, gpus.size(), solver->param());
-    p2p_mgr.Run(gpus);
+  if (world_size <= 4) {
+      if (gpus.size() > 1) {
+          caffe::P2PManager p2p_mgr(solver, gpus.size(), solver->param());
+          p2p_mgr.Run(gpus);
+      } else {
+          LOG(INFO) << "Starting Optimization";
+          solver->Solve();
+
+          if (gpus.size() == 1) {
+              std::ostringstream os;
+              os.precision(4);
+              solver->perf_report(os, gpus[0]);
+              LOG(INFO) << os.str();
+          }
+      } 
   } else {
-    LOG(INFO) << "Starting Optimization";
-
-    solver->Solve();
-
-    if (gpus.size() == 1) {
-      std::ostringstream os;
-      os.precision(4);
-      solver->perf_report(os, gpus[0]);
-      LOG(INFO) << os.str();
-    }
+    int world_size;
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    DistManager dist_manager(solver, gpus, world_size);
+    dist_manager.Run();
+    LOG(INFO) << "In progress with MPI";
   }
+
   LOG(INFO) << "Optimization Done in " << Caffe::time_from_init();
   return 0;
 }
@@ -448,6 +461,7 @@ RegisterBrewFunction(time);
 
 int main(int argc, char** argv) {
   // Print output to stderr (while still logging).
+  MPI_Init(&argc, &argv);
   FLAGS_alsologtostderr = 1;
   // Set version
   gflags::SetVersionString(AS_STRING(CAFFE_VERSION));
@@ -493,4 +507,6 @@ int main(int argc, char** argv) {
   } else {
     gflags::ShowUsageWithFlagsRestrict(argv[0], "tools/caffe");
   }
+  MPI_Barrier(MPI_COMM_WORLD);
+  MPI_Finalize();
 }
