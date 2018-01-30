@@ -227,7 +227,7 @@ int train() {
     CopyLayers(solver.get(), FLAGS_weights);
   }
 
-  if (world_size <= 4) {
+  if (world_size <= 1) {
       if (gpus.size() > 1) {
           caffe::P2PManager p2p_mgr(solver, gpus.size(), solver->param());
           p2p_mgr.Run(gpus);
@@ -243,8 +243,6 @@ int train() {
           }
       } 
   } else {
-    int world_size;
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     DistManager dist_manager(solver, gpus, world_size);
     dist_manager.Run();
     LOG(INFO) << "In progress with MPI";
@@ -497,7 +495,10 @@ int main(int argc, char** argv) {
 #ifdef WITH_PYTHON_LAYER
     try {
 #endif
-      return GetBrewFunction(caffe::string(argv[1]))();
+      int ret =  GetBrewFunction(caffe::string(argv[1]))();
+      MPI_Barrier(MPI_COMM_WORLD);
+      MPI_Finalize();
+      return ret;
 #ifdef WITH_PYTHON_LAYER
     } catch (bp::error_already_set) {
       PyErr_Print();
@@ -507,6 +508,5 @@ int main(int argc, char** argv) {
   } else {
     gflags::ShowUsageWithFlagsRestrict(argv[0], "tools/caffe");
   }
-  MPI_Barrier(MPI_COMM_WORLD);
-  MPI_Finalize();
+  return 0;
 }

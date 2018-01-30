@@ -11,6 +11,7 @@
 namespace caffe {
 
 class Semaphore;
+class P2PManager;
 
 class DistManager {
  public:
@@ -28,12 +29,20 @@ class DistManager {
 
   // Callback
   void SolverInitialized(shared_ptr<Solver> solver, int inter_rank);
+  void ParamIdPushed(int type_id, const int param_id, int inner_rank);
+  Semaphore* semaphore() {
+      return semaphore_;
+  }
+  int nranks() {
+      return nranks_;
+  }
 
 
  protected:
   const size_t nranks_;
   shared_ptr<Solver> root_solver_;
   int rank_;
+  int reduce_counter_;
 
   vector<shared_ptr<Solver>> solvers_;
   caffe::P2PManager* p2pmanager_;
@@ -43,10 +52,11 @@ class DistManager {
 
   Semaphore *semaphore_;
   void *learnable_params_cpu_;
+  void *learnable_params_cpu_out_;
 
   unique_ptr<boost::thread> reduce_thread0_;
   unique_ptr<boost::thread> reduce_thread1_;
-  BlockingQueue<int> reduction_queue_[2];
+  BlockingQueue<int> reduction_queue_[2][4];
 
 }; // class DistManager
 

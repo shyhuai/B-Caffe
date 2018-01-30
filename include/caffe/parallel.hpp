@@ -18,6 +18,7 @@
 #ifdef USE_NCCL
 #include "caffe/util/nccl.hpp"
 #endif
+#include "caffe/distributed.hpp"
 
 namespace caffe {
 
@@ -47,6 +48,7 @@ class P2PSync;
 class P2PManager {
  public:
   P2PManager(shared_ptr<Solver> root_solver, int nranks, const SolverParameter& param);
+  P2PManager(shared_ptr<Solver> root_solver, int nranks, const SolverParameter& param, DistManager* dist_mgr);
 
   void Run(const vector<int>& gpus);
   void EarlyCancel(P2PSync* killed);
@@ -64,12 +66,16 @@ class P2PManager {
       rbar1->wait();
     }
   }
+  DistManager* dist_mgr() {
+      return dist_mgr_;
+  }
 
  protected:
   const size_t nranks_;
   vector<unique_ptr<P2PSync>> syncs_;
   shared_ptr<SharedScores<float>> shared_;
   shared_ptr<Solver> root_solver_;
+  DistManager* dist_mgr_;
 
   static unique_ptr<boost::barrier> dl_bar;  // DataLayer sync helper
   static unique_ptr<boost::barrier> bar;
@@ -100,6 +106,10 @@ class P2PSync : public Solver::Callback, public InternalThread {
   void reduce_barrier(int type_id) override;
   void saveTestResults(float loss, const vector<float>& scores) override;
   void aggregateTestResults(float* loss, vector<float>* scores) override;
+  void paramIdPushed(int type_id, const int param_id, int inner_rank) override;
+  void all_barrier() override;
+  void all_barrier_release() override;
+  int get_mpi_world_size() override;
 
 #ifndef CPU_ONLY
   cublasHandle_t cublas_handle() const override {

@@ -86,6 +86,10 @@ class Solver {
     virtual void reduce_barrier(int type_id) = 0;
     virtual void saveTestResults(float loss, const vector<float>& scores) = 0;
     virtual void aggregateTestResults(float* loss, vector<float>* scores) = 0;
+    virtual void paramIdPushed(int type_id, const int param_id, int inner_rank) = 0;
+    virtual void all_barrier() = 0;
+    virtual void all_barrier_release() = 0;
+    virtual int get_mpi_world_size() = 0;
 
 #ifndef CPU_ONLY
     virtual cublasHandle_t cublas_handle() const = 0;

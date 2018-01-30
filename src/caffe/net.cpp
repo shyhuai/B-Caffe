@@ -758,7 +758,8 @@ void Net::BackwardFromToAu(int start, int end, bool apply_update) {
         int t = (int)learnable_params_[lparam_id]->diff_type();
         for (int type_id = 0; type_id < learnable_types_.size(); ++type_id) {
           if (t == learnable_types_[type_id]) {
-            reduction_queue_[type_id].push(lparam_id);
+            //reduction_queue_[type_id].push(lparam_id);
+            push_reducetion_queue(type_id, param_id);
             break;
           }
         }
@@ -767,14 +768,16 @@ void Net::BackwardFromToAu(int start, int end, bool apply_update) {
   }
   if (apply_update) {
     for (int type_id = 0; type_id < learnable_types_.size(); ++type_id) {
-      reduction_queue_[type_id].push(END_OF_ITERATION);
+      //reduction_queue_[type_id].push(END_OF_ITERATION);
+      push_reducetion_queue(type_id, END_OF_ITERATION);
     }
   }
 }
 
 void Net::Finalize() {
   for (int type_id = 0; type_id < learnable_types_.size(); ++type_id) {
-    reduction_queue_[type_id].push(END_OF_TRAIN);
+    //reduction_queue_[type_id].push(END_OF_TRAIN);
+    push_reducetion_queue(type_id, END_OF_TRAIN);
   }
 }
 
@@ -821,7 +824,6 @@ void Net::ReduceAndUpdate(int type_id) {
   if (Caffe::solver_count() > 1 && reduce_buckets_ > 0) {
     bucket_size = align_up<6>(learnable_space_size_[type_id] / reduce_buckets_);
   }
-  bucket_size = 0UL;
   std::set<int> au_ids;
 #else
   void* handle = nullptr;
@@ -829,7 +831,8 @@ void Net::ReduceAndUpdate(int type_id) {
 
   const bool clear_grads = !solver_->param().snapshot_diff();
   while (!solver_->stop_reducing_requested(type_id)) {
-    const int param_id = reduction_queue_[type_id].pop();
+    //const int param_id = reduction_queue_[type_id].pop();
+    const int param_id = pop_reducetion_queue(type_id);
     SolverAction::Enum request = solver_->GetRequestedAction();
     if (SolverAction::STOP == request) {
       solver_->request_early_exit();
@@ -917,9 +920,17 @@ void Net::ReduceAndUpdateDist(int type_id) {
       const std::pair<int, size_t>& param = dist_queue_->pop();
       int id_from = param.first;
       size_t count = param.second;
-      if (id_from != HOLD_ON_REDUCE) {
+      LOG(INFO) << "Reading from queue, id_from: " << id_from << ", count: " << count;
+      if (id_from == HOLD_ON_REDUCE) {
+          continue;
+      } else if (id_from == END_OF_TRAIN) {
+          break;
+      } else {
+          Solver::Callback* cb = solver_->callback();
+          cb->all_barrier();
           ReduceBucket(type_id, count, learnable_params_[id_from]->diff_type(),
                   learnable_params_ptrs_[type_id][id_from]);
+          cb->all_barrier_release();
       }
   }
   DLOG(INFO) << "[" << Caffe::current_device() << "] Leaving ReduceAndUpdate thread";
@@ -969,6 +980,7 @@ void Net::Reduce(int type_id, int param_id) {
 }
 
 void Net::ReduceBucket(int type_id, size_t count, Type bucket_type, void* bucket) {
+  LOG(INFO) << "ReduceBucket with NCCL: " << solver_rank_;
   Solver::Callback* cb = solver_->callback();
   cb->reduce_barrier(type_id);
   {
@@ -980,8 +992,9 @@ void Net::ReduceBucket(int type_id, size_t count, Type bucket_type, void* bucket
     cb->allreduce_bucket(type_id, count, bucket, bucket_type);
     cb->reduce_barrier(type_id);
   }
-  Tensor::gpu_scal(count, bucket_type, bucket, 1.F / (Caffe::solver_count() * global_grad_scale()),
-      Caffe::cublas_handle());
+  //Tensor::gpu_scal(count, bucket_type, bucket, 1.F / (Caffe::solver_count() * global_grad_scale()),
+  //    Caffe::cublas_handle());
+  LOG(INFO) << "NCCL allreduce finised: " << solver_rank_;
 }
 #endif
 
@@ -1472,6 +1485,12 @@ const vector<Type>& Net::learnable_types(bool reset) {
     CHECK_LE(learnable_types_.size(), 2);
   }
   return learnable_types_;
+}
+
+void Net::push_reducetion_queue(int type_id, const int param_id) {
+    reduction_queue_[type_id].push(param_id);
+    Solver::Callback* cb = solver_->callback();
+    cb->paramIdPushed(type_id, param_id, solver_rank_);
 }
 
 #endif

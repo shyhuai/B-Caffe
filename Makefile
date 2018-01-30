@@ -30,6 +30,8 @@ THIRDPARTY_DIR := ./3rdparty
 SRC_DIRS := $(shell find * -type d -exec bash -c "find {} -maxdepth 1 \
 	\( -name '*.cpp' -o -name '*.proto' \) | grep -q ." \; -print)
 
+
+
 # The target shared library name
 LIBRARY_NAME := $(PROJECT)$(LIBRARY_NAME_SUFFIX)
 LIB_BUILD_DIR := $(BUILD_DIR)/lib
@@ -183,6 +185,12 @@ ifneq ("$(wildcard $(CUDA_DIR)/lib64)","")
 endif
 CUDA_LIB_DIR += $(CUDA_DIR)/lib
 
+# MPI for distributed version
+#ifeq ($(USE_MPI), 1)
+INCLUDE_DIRS += $(MPI_ROOT)/include
+LIBRARY_DIRS += $(MPI_ROOT)/lib
+#endif
+
 INCLUDE_DIRS += $(BUILD_INCLUDE_DIR) ./src ./include $(THIRDPARTY_DIR)
 ifneq ($(CPU_ONLY), 1)
 	INCLUDE_DIRS += $(CUDA_INCLUDE_DIR)
@@ -215,7 +223,7 @@ ifeq ($(USE_LMDB), 1)
 	LIBRARIES += lmdb
 endif
 ifeq ($(USE_OPENCV), 1)
-	LIBRARIES += opencv_core opencv_highgui opencv_imgproc
+	LIBRARIES += opencv_core opencv_highgui opencv_imgproc opencv_imgcodecs
 
 	ifeq ($(OPENCV_VERSION), 3)
 		LIBRARIES += opencv_imgcodecs
@@ -463,11 +471,6 @@ endif
 INCLUDE_DIRS += $(BLAS_INCLUDE)
 LIBRARY_DIRS += $(BLAS_LIB)
 
-# MPI for distributed version
-#ifeq ($(USE_MPI), 1)
-INCLUDE_DIRS += $(MPI_ROOT)/include
-LIBRARY_DIRS += $(MPI_ROOT)/lib
-#endif
 
 LIBRARY_DIRS += /home/comp/csshshi/repositories/nvcaffe-dist/build/lib $(LIB_BUILD_DIR)
 

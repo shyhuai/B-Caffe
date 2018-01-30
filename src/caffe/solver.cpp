@@ -413,7 +413,11 @@ void Solver::Reduce(Callback* callback, int device, Caffe::Brew mode, uint64_t r
   Caffe::set_random_seed(random_seed);
   Caffe::set_solver_count(solver_count);
   Caffe::set_root_solver(root_solver);
-  net_->ReduceAndUpdate(type_id);
+  if (callback->get_mpi_world_size() > 1) {
+      net_->ReduceAndUpdateDist(type_id);
+  } else {
+      net_->ReduceAndUpdate(type_id);
+  }
 }
 
 bool Solver::Solve(const char* resume_file) {

@@ -342,7 +342,6 @@ class Net {
   /// @brief Multi-GPU reduction for a particular parameter.
 #ifndef CPU_ONLY
   void Reduce(int type_id, int param_id);
-  /// @brief Multi-GPU reduction for a particular bucket of parameters.
   void ReduceBucket(int type_id, size_t count, Type bucket_type, void* bucket);
   size_t received_contiguous_count(int type_id, const std::set<int>& au_ids, int& from);
 #endif
@@ -445,6 +444,11 @@ class Net {
   Solver* solver_;
   size_t solver_rank_;
   BlockingQueue<int> reduction_queue_[2];
+  const int pop_reducetion_queue(int type_id) {
+      const int param_id = reduction_queue_[type_id].pop();
+      return param_id;
+  }
+  void push_reducetion_queue(int type_id, const int param_id); 
   BlockingQueue<std::pair<int, size_t>> *dist_queue_;
   Flag* solver_init_flag_;
   Flag* solver_iter0_flag_;

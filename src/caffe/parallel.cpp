@@ -23,7 +23,24 @@ P2PManager::P2PManager(shared_ptr<Solver> root_solver,
     int nranks, const SolverParameter& solver_param) :
       nranks_(nranks),
       syncs_(nranks),
-      root_solver_(root_solver) {
+      root_solver_(root_solver)
+    {
+#ifndef USE_NCCL
+  LOG(FATAL) << "USE_NCCL must be specified for multi-GPU mode";
+#endif
+  dl_bar.reset(new boost::barrier(nranks_));
+  bar.reset(new boost::barrier(nranks_));
+  rbar0.reset(new boost::barrier(nranks_));
+  rbar1.reset(new boost::barrier(nranks_));
+}
+
+P2PManager::P2PManager(shared_ptr<Solver> root_solver,
+    int nranks, const SolverParameter& solver_param, DistManager* dist_mgr) :
+      nranks_(nranks),
+      syncs_(nranks),
+      root_solver_(root_solver),
+      dist_mgr_(dist_mgr)
+    {
 #ifndef USE_NCCL
   LOG(FATAL) << "USE_NCCL must be specified for multi-GPU mode";
 #endif
@@ -187,6 +204,25 @@ void P2PSync::reduce_barrier(int type_id) {
 #endif
 }
 
+void P2PSync::all_barrier() {
+    if (mgr_ && mgr_->dist_mgr()) {
+        mgr_->dist_mgr()->semaphore()->Wait();
+    }
+}
+
+void P2PSync::all_barrier_release() {
+    if (mgr_ && mgr_->dist_mgr()) {
+        mgr_->dist_mgr()->semaphore()->Signal();
+    }
+}
+
+int P2PSync::get_mpi_world_size() {
+    if (mgr_ && mgr_->dist_mgr()) {
+        return mgr_->dist_mgr()->nranks();
+    }
+    return 1;
+}
+
 void P2PSync::on_start(const vector<shared_ptr<Blob>>& net) {
 #ifndef CPU_ONLY
 #ifdef USE_NCCL
@@ -205,6 +241,17 @@ void P2PSync::on_start(const vector<shared_ptr<Blob>>& net) {
   CUDA_CHECK(cudaStreamSynchronize(comm_stream_[0]->get()));
 #endif  // USE_NCCL
 #endif
+  // Distributed callback
+  if(mgr_ && mgr_->dist_mgr()) {
+    mgr_->dist_mgr()->SolverInitialized(this->solver_, this->rank_);
+  }
+}
+
+void P2PSync::paramIdPushed(int type_id, const int param_id, int inner_rank) 
+{
+  if(mgr_ && mgr_->dist_mgr()) {
+    mgr_->dist_mgr()->ParamIdPushed(type_id, param_id, inner_rank);
+  }
 }
 
 void P2PSync::allreduce(int type_id, int param_id) {
