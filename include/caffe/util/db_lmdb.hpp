@@ -27,6 +27,18 @@ class LMDBCursor : public Cursor {
     mdb_txn_abort(mdb_txn_);
   }
   void SeekToFirst() override { Seek(MDB_FIRST); }
+  void MoveToOffset(size_t offset) override {
+      SeekToFirst();
+      for (int i = 0; i < offset; ++i) {
+          int mdb_status = mdb_cursor_get(mdb_cursor_, &mdb_key_, NULL, MDB_NEXT);
+          if (mdb_status == MDB_NOTFOUND) {
+              valid_ = false;
+          } else {
+              MDB_CHECK(mdb_status);
+              valid_ = true;
+          }
+      }
+  }
   void Next() override { Seek(MDB_NEXT); }
   string key() const override {
     return string(static_cast<const char*>(mdb_key_.mv_data), mdb_key_.mv_size);

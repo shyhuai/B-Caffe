@@ -12,6 +12,7 @@ namespace caffe {
 
 class Semaphore;
 class P2PManager;
+class Overhead;
 
 class DistManager {
  public:
@@ -22,6 +23,8 @@ class DistManager {
   void Run();
   void Allreduce(int count);
   int rank();
+  static int GetWorldRank();
+  static int GetWorldSize();
 
   // Another thread
   void GetReduceBucketId(int type_id, int &id_from, size_t &count);
@@ -29,20 +32,24 @@ class DistManager {
 
   // Callback
   void SolverInitialized(shared_ptr<Solver> solver, int inter_rank);
-  void ParamIdPushed(int type_id, const int param_id, int inner_rank);
+  void ParamIdPushed(int type_id, const int param_id, int inner_rank, double time);
   Semaphore* semaphore() {
       return semaphore_;
   }
   int nranks() {
       return nranks_;
   }
-
+  void print_overheads();
 
  protected:
+  vector<Overhead *> overheads_;
+  map<int, int> param_id_indexes_;
   const size_t nranks_;
   shared_ptr<Solver> root_solver_;
   int rank_;
   int reduce_counter_;
+  bool benchmark_;
+  Timer allreduce_timer_;
 
   vector<shared_ptr<Solver>> solvers_;
   caffe::P2PManager* p2pmanager_;
@@ -89,6 +96,26 @@ class Semaphore {
    boost::condition_variable cv_;
    long count_;
    long size_;
+};
+
+class Overhead {
+    public:
+        Overhead(int param_id, size_t size):
+            param_id_(param_id), size_(size) {
+                compute_time_ = 0.0;
+                communication_time_ = 0.0;
+            }
+        ~Overhead() {}
+        int param_id_;
+        size_t size_;
+        double compute_time_;
+        double communication_time_;
+        void set_compute_time(double compute_time) {
+            compute_time_ = compute_time;
+        }
+        void set_communication_time(double communication_time) {
+            communication_time_ = communication_time;
+        }
 };
 
 }// namespace caffe

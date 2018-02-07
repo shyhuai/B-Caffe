@@ -106,6 +106,7 @@ void DataReader::InternalThreadEntryN(size_t thread_id) {
       ranked_rec = (size_t) datum->record_id() / cm.full_cycle();
       batch_on_solver = ranked_rec * parser_threads_num_ + thread_id;
       queue_id = batch_on_solver % queues_num_;
+      //DLOG(INFO) << "Reader  " << ", batch_size_: " << batch_size_<< ", ranked_rec: " << ranked_rec<< ", parser_threads_num: " << parser_threads_num_<< ", thread_id: " << thread_id<< ", batch_on_solver: " << batch_on_solver;
 
       if (thread_id == 0 && skip > 0U) {
         --skip;
@@ -289,7 +290,8 @@ void DataReader::CursorManager::next(shared_ptr<Datum>& datum) {
         break;  // we cache first epoch, then we just read it from cache
       }
       LOG_IF(INFO, solver_rank_ == 0 && parser_thread_id_ == 0) << "Restarting data pre-fetching";
-      cursor_->SeekToFirst();
+      //cursor_->SeekToFirst();
+      cursor_->MoveToOffset(full_cycle_ * caffe::DistManager::GetWorldRank());
     }
   }
 }
@@ -321,11 +323,13 @@ void DataReader::CursorManager::rewind() {
   size_t rank_cycle_begin = rank_cycle_ * solver_rank_;
   rec_id_ = rank_cycle_begin + parser_thread_id_ * batch_size_;
   rec_end_ = rec_id_ + batch_size_;
-  cursor_->SeekToFirst();
+  //cursor_->SeekToFirst();
+  cursor_->MoveToOffset(full_cycle_ * caffe::DistManager::GetWorldRank());
   for (size_t i = 0; i < rec_id_; ++i) {
     cursor_->Next();
     if (!cursor_->valid()) {
-      cursor_->SeekToFirst();
+      //cursor_->SeekToFirst();
+      cursor_->MoveToOffset(full_cycle_ * caffe::DistManager::GetWorldRank());
     }
   }
 }

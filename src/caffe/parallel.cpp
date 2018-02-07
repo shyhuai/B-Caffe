@@ -247,10 +247,10 @@ void P2PSync::on_start(const vector<shared_ptr<Blob>>& net) {
   }
 }
 
-void P2PSync::paramIdPushed(int type_id, const int param_id, int inner_rank) 
+void P2PSync::paramIdPushed(int type_id, const int param_id, int inner_rank, double time) 
 {
   if(mgr_ && mgr_->dist_mgr()) {
-    mgr_->dist_mgr()->ParamIdPushed(type_id, param_id, inner_rank);
+    mgr_->dist_mgr()->ParamIdPushed(type_id, param_id, inner_rank, time);
   }
 }
 

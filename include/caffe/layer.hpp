@@ -144,6 +144,10 @@ class LayerBase {
     solver_rank_ = solver_rank;
   }
 
+  void set_world_rank(size_t world_rank) {
+    world_rank_ = world_rank_;
+  }
+
   Net* parent_net() {
     return parent_net_;
   }
@@ -394,6 +398,7 @@ class LayerBase {
   Phase phase_;
 
   size_t solver_rank_;
+  size_t world_rank_;
   bool debug_;
   bool fm_by_user_, bm_by_user_;
   Net* parent_net_;

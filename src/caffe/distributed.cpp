@@ -12,7 +12,8 @@ DistManager::DistManager(shared_ptr<Solver> root_solver, const vector<int>& gpus
     nranks_(nranks),
     root_solver_(root_solver),
     rank_(-1),
-    reduce_counter_(1)
+    reduce_counter_(1),
+    benchmark_(true)
 {
     gpus_ = gpus;
     Init();
@@ -24,6 +25,9 @@ DistManager::~DistManager()
     CUDA_CHECK(cudaFreeHost(learnable_params_cpu_out_)); 
     delete semaphore_;
     delete p2pmanager_;
+    for (int i = 0; i < overheads_.size(); i++) {
+        delete overheads_[i];
+    }
 }
 
 int DistManager::rank() {
@@ -33,6 +37,18 @@ int DistManager::rank() {
         rank_ = world_rank;
     }
     return rank_;
+}
+
+int DistManager::GetWorldRank() {
+    int world_rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    return world_rank;
+}
+
+int DistManager::GetWorldSize() {
+  int world_size;
+  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+  return world_size;
 }
 
 void DistManager::Init()
@@ -57,6 +73,7 @@ void DistManager::SolverInitialized(shared_ptr<Solver> solver, int inter_rank)
     if (solver == root_solver_) {
         LOG(INFO) << "At root solver, inter rank: " << rank();
         size_t learnable_space_size = root_solver_->net()->learnable_space_size(0);
+        LOG(INFO) << "learnable_space_size: " << learnable_space_size;
         CUDA_CHECK(cudaMallocHost(&learnable_params_cpu_, learnable_space_size));
         CUDA_CHECK(cudaMallocHost(&learnable_params_cpu_out_, learnable_space_size));
         //learnable_params_cpu_ = (void *)malloc(learnable_space_size);
@@ -65,11 +82,33 @@ void DistManager::SolverInitialized(shared_ptr<Solver> solver, int inter_rank)
             LOG(ERROR) << "Malloc cpu buffer error! Abort";
             exit(1);
         }
+
+        const vector<int>& learnable_param_ids = root_solver_->net()->learnable_param_ids();
+
+        //LOG(INFO) << "----------------------- param_ids: ";
+        for (int i = 0; i < learnable_param_ids.size(); i++) {
+            int param_id = learnable_param_ids[i];
+            size_t count = root_solver_->net()->lp_aligned_count(param_id);
+            Overhead *overhead = new Overhead(param_id, count);
+            overheads_.push_back(overhead);
+            param_id_indexes_[param_id] = i;
+            //LOG(INFO) << "["<<i<<"]:"<<learnable_param_ids[i];
+        }
+        print_overheads();
+        //LOG(INFO) << "----------------------- param_ids end";
         reduce_thread0_.reset(new boost::thread(&DistManager::ReduceLoop, this, 0));
     } else {
         LOG(INFO) << "At normal solver";
     }
     solvers_.push_back(solver);
+}
+
+void DistManager::print_overheads() {
+    LOG(INFO) << "------ overheads: [id, size, compute_time, communication_time]";
+    for (int i = 0; i < overheads_.size(); i++) {
+      Overhead *overhead = overheads_[i];
+      LOG(INFO) << "[" << overhead->param_id_ << ", " << overhead->size_ << ", "<< overhead->compute_time_ << ", " << overhead->communication_time_ << "]";
+    }
 }
 
 void DistManager::GetReduceBucketId(int type_id, int &id_from, size_t &count)
@@ -96,10 +135,14 @@ void DistManager::GetReduceBucketId(int type_id, int &id_from, size_t &count)
     }
 }
 
-void DistManager::ParamIdPushed(int type_id, const int param_id, int inner_rank) 
+void DistManager::ParamIdPushed(int type_id, const int param_id, int inner_rank, double time) 
 {
     if (inner_rank == 0) {
         reduction_queue_[type_id][inner_rank].push(param_id);
+        if (benchmark_ && param_id < overheads_.size() && param_id >= 0) {
+            Overhead *overhead = overheads_[param_id_indexes_[param_id]];
+            overhead->set_compute_time(time);
+        }
         LOG(INFO) << "ParamIdPushed: " << " type_id: " << type_id << ", param_id: " << param_id << ", inner_rank: " << inner_rank;
     }
 }
@@ -138,18 +181,39 @@ void DistManager::ReduceLoop(int type_id)
 
         LOG(INFO) << "Start to copy from GPU to CPU";
         // 2. Copy from GPU0 (root_solver) to CPU
+        allreduce_timer_.Start();
+        CUDA_CHECK(cudaSetDevice(gpus_[0]));
         caffe_gpu_memcpy(count, root_solver_->net()->learnable_params_ptr(type_id)[real_id_from], learnable_params_cpu_);
 
         // 3. MPI_allreduce
         Allreduce(count);
+
+        // 4. Update model
+        // learnable_params_[id_from]->diff_type()
+        LOG(INFO) << "Update model in the cpu side";
+        Tensor::cpu_scal(count, root_solver_->net()->learnable_params()[real_id_from]->diff_type(), learnable_params_cpu_out_, 1.F / (Caffe::solver_count() * root_solver_->net()->global_grad_scale() * nranks_));
         
-        // 4. Copy back from CPU to GPU0,1,...
+        // 5. Copy back from CPU to GPU0,1,...
         LOG(INFO) << "Copy back from CPU to GPU0,1,...";
-        for (auto id = solvers_.begin(); id != solvers_.end(); ++id) {
-            const shared_ptr<Solver> solver = *id;
+        //for (auto id = solvers_.begin(); id != solvers_.end(); ++id) {
+        for (int i = 0; i < solvers_.size(); ++i) {
+            const shared_ptr<Solver> solver = solvers_[i];
+            int gpu_id = gpus_[i];
+            CUDA_CHECK(cudaSetDevice(gpu_id));
             //caffe_gpu_memcpy(count, learnable_params_cpu_out_, solver->net()->learnable_params_ptr(type_id)[id_from]);
             caffe_gpu_memcpy(count, learnable_params_cpu_out_, solver->net()->learnable_params()[real_id_from]->current_mutable_data_memory(true));
-            solver->iteration_complete_signal(type_id);
+            if (id_from == Net::END_OF_ITERATION) {
+                solver->iteration_complete_signal(type_id);
+                if (benchmark_) {
+                    print_overheads();
+                    benchmark_ = false;
+                }
+            }
+        }
+        double time = allreduce_timer_.MicroSeconds();
+        if (benchmark_) {
+            Overhead *overhead = overheads_[param_id_indexes_[id_from]];
+            overhead->set_communication_time(time);
         }
     }
 }
@@ -159,6 +223,10 @@ void DistManager::Allreduce(int count)
 {
     LOG(INFO) << "MPI Allreduce... counter: " << reduce_counter_;
     reduce_counter_++;
+#if DEBUG
+    float *tmp = (float *)learnable_params_cpu_;
+    DLOG(INFO) << "MPIAllReduce before: " << tmp[0] << ", " <<tmp[1];
+#endif
     MPI_Allreduce(
             learnable_params_cpu_,
             learnable_params_cpu_out_,
@@ -166,6 +234,10 @@ void DistManager::Allreduce(int count)
             MPI_FLOAT,
             MPI_SUM,
             MPI_COMM_WORLD);
+#if DEBUG
+    tmp = (float *)learnable_params_cpu_out_;
+    DLOG(INFO) << "MPIAllReduce after: " << tmp[0] << ", " <<tmp[1];
+#endif
 }
 
 }  // namespace caffe

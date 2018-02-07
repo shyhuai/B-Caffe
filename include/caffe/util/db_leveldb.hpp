@@ -17,6 +17,9 @@ class LevelDBCursor : public Cursor {
     : iter_(iter) { SeekToFirst(); }
   ~LevelDBCursor() { delete iter_; }
   void SeekToFirst() override { iter_->SeekToFirst(); }
+  void MoveToOffset(size_t offset) override {
+  }
+
   void Next() override { iter_->Next(); }
   string key() const override { return iter_->key().ToString(); }
   string value() const override { return iter_->value().ToString(); }

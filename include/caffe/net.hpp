@@ -278,6 +278,9 @@ class Net {
   bool trained_layers_shared() const {
     return trained_layers_shared_;
   }
+  const vector<int>& learnable_param_ids() {
+      return learnable_param_ids_;
+  }
 
 #ifndef CPU_ONLY
   void InitializeLearnableDiffSpace(int type_id);
@@ -448,7 +451,7 @@ class Net {
       const int param_id = reduction_queue_[type_id].pop();
       return param_id;
   }
-  void push_reducetion_queue(int type_id, const int param_id); 
+  void push_reducetion_queue(int type_id, const int param_id, double time=0.0); 
   BlockingQueue<std::pair<int, size_t>> *dist_queue_;
   Flag* solver_init_flag_;
   Flag* solver_iter0_flag_;

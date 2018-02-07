@@ -15,6 +15,7 @@ class Cursor {
   Cursor() { }
   virtual ~Cursor() { }
   virtual void SeekToFirst() = 0;
+  virtual void MoveToOffset(size_t offset) = 0;
   virtual void Next() = 0;
   virtual string key() const = 0;
   virtual string value() const = 0;

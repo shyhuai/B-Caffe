@@ -146,6 +146,7 @@ DataLayer<Ftype, Btype>::DataLayerSetUp(const vector<Blob*>& bottom, const vecto
   const bool shuffle = cache && shuffle_ && this->phase_ == TRAIN;
 
   if (this->auto_mode_) {
+    LOG(INFO) <<"Data reader in auto_mode, sovler count: " << Caffe::solver_count();
     if (!sample_reader_) {
       sample_reader_ = make_shared<DataReader>(param,
           Caffe::solver_count(),

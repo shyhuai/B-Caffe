@@ -106,7 +106,7 @@ class P2PSync : public Solver::Callback, public InternalThread {
   void reduce_barrier(int type_id) override;
   void saveTestResults(float loss, const vector<float>& scores) override;
   void aggregateTestResults(float* loss, vector<float>* scores) override;
-  void paramIdPushed(int type_id, const int param_id, int inner_rank) override;
+  void paramIdPushed(int type_id, const int param_id, int inner_rank, double time) override;
   void all_barrier() override;
   void all_barrier_release() override;
   int get_mpi_world_size() override;

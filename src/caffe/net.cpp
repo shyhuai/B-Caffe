@@ -740,7 +740,10 @@ void Net::BackwardFromToAu(int start, int end, bool apply_update) {
       continue;
     }
 
+    Timer timer;
+    timer.Start();
     layers_[i]->Backward(top_vecs_[i], bottom_need_backward_[i], bottom_vecs_[i]);
+    double time = timer.MicroSeconds();
 
     if (debug_info_) {
       BackwardDebugInfo(i);
@@ -759,7 +762,7 @@ void Net::BackwardFromToAu(int start, int end, bool apply_update) {
         for (int type_id = 0; type_id < learnable_types_.size(); ++type_id) {
           if (t == learnable_types_[type_id]) {
             //reduction_queue_[type_id].push(lparam_id);
-            push_reducetion_queue(type_id, param_id);
+            push_reducetion_queue(type_id, param_id, time);
             break;
           }
         }
@@ -1487,10 +1490,10 @@ const vector<Type>& Net::learnable_types(bool reset) {
   return learnable_types_;
 }
 
-void Net::push_reducetion_queue(int type_id, const int param_id) {
+void Net::push_reducetion_queue(int type_id, const int param_id, double time) {
     reduction_queue_[type_id].push(param_id);
     Solver::Callback* cb = solver_->callback();
-    cb->paramIdPushed(type_id, param_id, solver_rank_);
+    cb->paramIdPushed(type_id, param_id, solver_rank_, time);
 }
 
 #endif
