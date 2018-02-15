@@ -49,6 +49,7 @@ class DistManager {
   int rank_;
   int reduce_counter_;
   bool benchmark_;
+  int iter_;
   Timer allreduce_timer_;
 
   vector<shared_ptr<Solver>> solvers_;
@@ -104,17 +105,22 @@ class Overhead {
             param_id_(param_id), size_(size) {
                 compute_time_ = 0.0;
                 communication_time_ = 0.0;
+                merged_time_ = 0.0;
             }
         ~Overhead() {}
         int param_id_;
         size_t size_;
         double compute_time_;
         double communication_time_;
+        double merged_time_;
         void set_compute_time(double compute_time) {
             compute_time_ = compute_time;
         }
         void set_communication_time(double communication_time) {
             communication_time_ = communication_time;
+        }
+        void set_merged_time(double merged_time) {
+            merged_time_ =  merged_time;
         }
 };
 

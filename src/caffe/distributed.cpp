@@ -13,7 +13,8 @@ DistManager::DistManager(shared_ptr<Solver> root_solver, const vector<int>& gpus
     root_solver_(root_solver),
     rank_(-1),
     reduce_counter_(1),
-    benchmark_(true)
+    benchmark_(true),
+    iter_(0)
 {
     gpus_ = gpus;
     Init();
@@ -94,7 +95,7 @@ void DistManager::SolverInitialized(shared_ptr<Solver> solver, int inter_rank)
             param_id_indexes_[param_id] = i;
             //LOG(INFO) << "["<<i<<"]:"<<learnable_param_ids[i];
         }
-        print_overheads();
+        //print_overheads();
         //LOG(INFO) << "----------------------- param_ids end";
         reduce_thread0_.reset(new boost::thread(&DistManager::ReduceLoop, this, 0));
     } else {
@@ -104,10 +105,12 @@ void DistManager::SolverInitialized(shared_ptr<Solver> solver, int inter_rank)
 }
 
 void DistManager::print_overheads() {
-    LOG(INFO) << "------ overheads: [id, size, compute_time, communication_time]";
-    for (int i = 0; i < overheads_.size(); i++) {
-      Overhead *overhead = overheads_[i];
-      LOG(INFO) << "[" << overhead->param_id_ << ", " << overhead->size_ << ", "<< overhead->compute_time_ << ", " << overhead->communication_time_ << "]";
+    if (rank() == 0) {
+        LOG(INFO) << "------ overheads: [id, size, compute_time, communication_time]";
+        for (int i = 0; i < overheads_.size(); i++) {
+            Overhead *overhead = overheads_[i];
+            LOG(INFO) << "[" << overhead->param_id_ << ", " << overhead->size_ << ", "<< overhead->compute_time_ << ", " << overhead->communication_time_ << ", " << overhead->merged_time_ << "]";
+        }
     }
 }
 
@@ -120,13 +123,25 @@ void DistManager::GetReduceBucketId(int type_id, int &id_from, size_t &count)
     } else {
         au_ids_.push_back(param_id);
     }
+    if (au_ids_.size() % 2 != 0) {
+        id_from = Net::HOLD_ON_REDUCE;
+        return;
+    }
     size_t cnt = 0UL;
     for (auto p = au_ids_.begin(); p != au_ids_.end(); ++p) {
-        int param_id = *p;
-        cnt += root_solver_->net()->lp_aligned_count(param_id);
-        id_from = param_id;
+        int tmp_param_id = *p;
+        cnt += root_solver_->net()->lp_aligned_count(tmp_param_id);
+        if (tmp_param_id % 2 == 0) {
+            id_from = tmp_param_id;
+        }
+        LOG(INFO) << "ParamId in queue: " << tmp_param_id;
     }
-    if (cnt > 0 || param_id == Net::END_OF_TRAIN || param_id == Net::END_OF_ITERATION) {
+    if (param_id == Net::END_OF_TRAIN || param_id == Net::END_OF_ITERATION) {
+        count = cnt;
+        id_from = param_id;
+        return;
+    }
+    if ((benchmark_ && cnt > 0) || (param_id % 2 != 0 && cnt > 8192*4)) {
         count = cnt;
         id_from = param_id;
     } else {
@@ -157,20 +172,25 @@ void DistManager::ReduceLoop(int type_id)
         int id_from;
         size_t count;
         GetReduceBucketId(type_id, id_from, count);
+        LOG(INFO) << "Fetched id_from: " << id_from << ", count: " << count; 
         if (id_from == Net::HOLD_ON_REDUCE)  {
             continue;
         }         
         LOG(INFO) << "Prepare to reduce..., solver size: " << solvers_.size();
         int real_id_from = id_from;
         if (id_from != Net::END_OF_TRAIN) {
-            real_id_from = au_ids_[au_ids_.size()-1];
+            real_id_from = au_ids_[au_ids_.size()-2];
         }
-        au_ids_.clear();
         for (int i = 0; i < solvers_.size(); ++i) {
             BlockingQueue<std::pair<int, size_t>>* nq = notify_queues_[i];
             nq->push(std::make_pair(real_id_from, count));
         }
         if (id_from == Net::END_OF_TRAIN) {
+            for (int i = 0; i < solvers_.size(); ++i) {
+                BlockingQueue<std::pair<int, size_t>>* nq = notify_queues_[i];
+                nq->push(std::make_pair(Net::END_OF_TRAIN, 0));
+            }
+
             break;
         }
 
@@ -195,27 +215,45 @@ void DistManager::ReduceLoop(int type_id)
         
         // 5. Copy back from CPU to GPU0,1,...
         LOG(INFO) << "Copy back from CPU to GPU0,1,...";
-        //for (auto id = solvers_.begin(); id != solvers_.end(); ++id) {
         for (int i = 0; i < solvers_.size(); ++i) {
             const shared_ptr<Solver> solver = solvers_[i];
             int gpu_id = gpus_[i];
             CUDA_CHECK(cudaSetDevice(gpu_id));
-            //caffe_gpu_memcpy(count, learnable_params_cpu_out_, solver->net()->learnable_params_ptr(type_id)[id_from]);
             caffe_gpu_memcpy(count, learnable_params_cpu_out_, solver->net()->learnable_params()[real_id_from]->current_mutable_data_memory(true));
-            if (id_from == Net::END_OF_ITERATION) {
-                solver->iteration_complete_signal(type_id);
-                if (benchmark_) {
-                    print_overheads();
-                    benchmark_ = false;
-                }
+
+        }
+
+        for (int i = 0; i < solvers_.size(); ++i) {
+            BlockingQueue<std::pair<int, size_t>>* nq = notify_queues_[i];
+            for (int id_reduced: au_ids_) {
+                nq->push(std::make_pair(Net::END_OF_REDUCE, id_reduced));
             }
         }
+
+        au_ids_.clear();
+        if (id_from == Net::END_OF_ITERATION) {
+            iter_++;
+            if (benchmark_ && iter_ > 3) {
+                print_overheads();
+                benchmark_ = false;
+            }
+
+            for (int i = 0; i < solvers_.size(); ++i) {
+                BlockingQueue<std::pair<int, size_t>>* nq = notify_queues_[i];
+                nq->push(std::make_pair(Net::END_OF_ITERATION, 0));
+                }
+        }
+
         double time = allreduce_timer_.MicroSeconds();
         if (benchmark_) {
-            Overhead *overhead = overheads_[param_id_indexes_[id_from]];
+            Overhead *overhead = overheads_[param_id_indexes_[real_id_from]];
             overhead->set_communication_time(time);
+        } else {
+            Overhead *overhead = overheads_[param_id_indexes_[real_id_from]];
+            overhead->set_merged_time(time);
         }
     }
+    print_overheads();
 }
 
 

@@ -471,6 +471,7 @@ class Net {
   static constexpr int END_OF_ITERATION = -1;
   static constexpr int END_OF_TRAIN = -2;
   static constexpr int HOLD_ON_REDUCE = -3;
+  static constexpr int END_OF_REDUCE = -4;
 };
 
 }  // namespace caffe

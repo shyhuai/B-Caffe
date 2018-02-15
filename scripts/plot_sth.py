@@ -36,11 +36,12 @@ def render_log(filename):
     for l in f.readlines():
         items = l.split('[')[1][0:-2].split(',')
         items = [float(it.strip()) for it in items]
-        if items[1] < 4096:
+        if items[1] < 1024 or int(items[2]) == 0:
             continue
         sizes.append(items[1])
         computes.append(items[2])
-        comms.append(items[3])
+        #comms.append(items[3])
+        comms.append(items[4])
     f.close()
     sizes = sizes[::-1]
     computes = computes[::-1]
@@ -50,7 +51,9 @@ def render_log(filename):
     comm = 0.0
     max_time = max(np.sum(computes), np.sum(comms)+computes[0])
     fig, ax = plt.subplots(1)
+    print('sizes: ', sizes)
     print('computes: ', computes)
+    print('communications: ', comms)
     for i in range(len(computes)):
         comp = computes[i]
         bar = Bar(start_time, comp, max_time, ax, type='p')
@@ -68,5 +71,10 @@ def render_log(filename):
 
 if __name__ == '__main__':
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/alexnet/tmpcomm.log'
-    test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/googlenet/tmpcomm.log'
+    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/googlenet/tmp2comm.log'
+    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/googlenet/tmp4comm.log'
+    test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/googlenet/tmp4ocomm.log'
+    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp2comm.log'
+    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp4comm.log'
+    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp8comm.log'
     render_log(test_file)

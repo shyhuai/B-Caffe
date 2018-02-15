@@ -683,9 +683,9 @@ float Net::ForwardFromTo(int start, int end) {
   CHECK_LT(end, layers_.size());
   float loss = 0;
   for (int i = start; i <= end; ++i) {
-    // LOG(INFO) << " ****** [Forward] (" << i << ") Layer '" << layer_names_[i];
-    // << "' FT " << Type_Name(layers_[i]->forward_type())
-    // << " BT " << Type_Name(layers_[i]->backward_type());
+    //LOG(INFO) << " ****** [Forward] (" << i << ") Layer '" << layer_names_[i];
+    //<< "' FT " << Type_Name(layers_[i]->forward_type())
+    //<< " BT " << Type_Name(layers_[i]->backward_type());
     float layer_loss = layers_[i]->Forward(bottom_vecs_[i], top_vecs_[i]);
     loss += layer_loss;
     if (debug_info_) { ForwardDebugInfo(i); }
@@ -919,6 +919,7 @@ void Net::ReduceAndUpdate(int type_id) {
 void Net::ReduceAndUpdateDist(int type_id) {
   shared_ptr<CuBLASHandle> cublas_phandle = Caffe::cublas_phandle();
   cublasHandle_t handle = cublas_phandle->get();
+  const bool clear_grads = !solver_->param().snapshot_diff();
   while (!solver_->stop_reducing_requested(type_id)) {
       const std::pair<int, size_t>& param = dist_queue_->pop();
       int id_from = param.first;
@@ -928,6 +929,10 @@ void Net::ReduceAndUpdateDist(int type_id) {
           continue;
       } else if (id_from == END_OF_TRAIN) {
           break;
+      } else if (id_from == END_OF_REDUCE) {
+        add_wgrad_sq(solver_->ApplyUpdate(count, handle, clear_grads));
+      } else if (id_from == END_OF_ITERATION) {
+        solver_->iteration_complete_signal(type_id);
       } else {
           Solver::Callback* cb = solver_->callback();
           cb->all_barrier();
@@ -1424,7 +1429,7 @@ void Net::InitializeLearnableDiffSpace(int type_id) {
         if (param_owners_[lip] < 0) {
           const int param_id = learnable_param_ids_[lip];
           if (learnable_params_[param_id]->diff_type() == t) {
-            LOG(INFO) << "--- param_id: " << param_id << ", lp_aligned_count: " << lp_aligned_count(param_id) << ", lpsize: " << lp_size(param_id);
+            LOG(INFO) << "--- param_id: " << param_id << ", lp_aligned_count: " << lp_aligned_count(param_id) << ", lpsize: " << lp_size(param_id) << ", type_id: " << type_id;
             learnable_space_size_[type_id] += lp_aligned_count(param_id) * lp_size(param_id);
           }
         }
