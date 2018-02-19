@@ -141,7 +141,8 @@ void DistManager::GetReduceBucketId(int type_id, int &id_from, size_t &count)
         id_from = param_id;
         return;
     }
-    if ((benchmark_ && cnt > 0) || (param_id % 2 != 0 && cnt > 8192*4)) {
+    if ((benchmark_ && cnt > 0) || (param_id % 2 != 0 && cnt > 8192*16)) {
+    //if ((benchmark_ && cnt > 0) || (param_id % 2 != 0 && cnt > 0)) {
         count = cnt;
         id_from = param_id;
     } else {
