@@ -13,6 +13,7 @@ namespace caffe {
 class Semaphore;
 class P2PManager;
 class Overhead;
+class MergedParam;
 
 class DistManager {
  public:
@@ -40,6 +41,10 @@ class DistManager {
       return nranks_;
   }
   void print_overheads();
+  void merge_overheads();
+  double predict_comm_time(size_t size, int n);
+  int search_index(int startIdx, vector<Overhead *>& overheads);
+  void generate_merged_param();
 
  protected:
   vector<Overhead *> overheads_;
@@ -51,6 +56,7 @@ class DistManager {
   bool benchmark_;
   int iter_;
   Timer allreduce_timer_;
+  bool gradients_merged_;
 
   vector<shared_ptr<Solver>> solvers_;
   caffe::P2PManager* p2pmanager_;
@@ -65,6 +71,8 @@ class DistManager {
   unique_ptr<boost::thread> reduce_thread0_;
   unique_ptr<boost::thread> reduce_thread1_;
   BlockingQueue<int> reduction_queue_[2][4];
+  MergedParam* merged_param_;
+  map<int, int> start_param_map_; // [orignal_param_id] = layer_start_param_id;
 
 }; // class DistManager
 
@@ -121,6 +129,57 @@ class Overhead {
         }
         void set_merged_time(double merged_time) {
             merged_time_ =  merged_time;
+        }
+};
+
+class MergedParam {
+    public:
+        MergedParam():num_group_(0) {}
+        ~MergedParam() {}
+        int num_group_;
+        vector<vector<int> *> merged_groups_;
+        vector<size_t> group_sizes_;
+        map<int, int> end_param_to_group_idx_; // [end_param_id] = group_idx;
+        void push_param_id(int param_id, int merged_param_id, size_t size) {
+            vector<int> *group;
+            if (merged_param_id == -1) {
+                group = new vector<int>();
+                merged_groups_.push_back(group);
+                group_sizes_.push_back(0);
+                num_group_++;
+                LOG(INFO) << "New group!!!!! num_group: " << num_group_;
+            } else {
+                group = merged_groups_[num_group_-1];
+            }
+            group->push_back(param_id);
+            group_sizes_[num_group_-1] += size;
+            end_param_to_group_idx_[param_id] = num_group_ - 1;
+        }
+        bool get_comm_param_id_and_size(int param_id, int& result_param_id, size_t& size) {
+            bool is_exist = end_param_to_group_idx_.count(param_id);
+            if (!is_exist) {
+                return false;
+            }
+            int group_idx = end_param_to_group_idx_[param_id];
+            result_param_id = merged_groups_[group_idx]->front();
+            size = group_sizes_[group_idx];
+            return true;
+        }
+        void print() {
+            LOG(INFO) << "===============Printing Merged Param============";
+            LOG(INFO) << "Number of groups: " << num_group_;
+            for (int i = 0; i < merged_groups_.size(); i++) {
+                vector<int>* group = merged_groups_[i];
+                std::ostringstream stringStream;
+                stringStream << "[" << i << "]: ";
+                for (int j = 0; j < group->size(); j++) {
+                    int param_id = group->at(j);
+                    stringStream << param_id << ", ";
+                }
+                stringStream << "\n";
+                LOG(INFO) << stringStream.str();
+            }
+            LOG(INFO) << "===============Merged Param End============";
         }
 };
 

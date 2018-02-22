@@ -370,6 +370,7 @@ message SolverParameter {
   // * FP32 blobs are stored in 'data' container.
   // * FP64 blobs are stored in 'double_data' container.
   optional bool store_blobs_in_old_format = 45 [default = false];
+  optional bool gradients_merged = 61 [default = false];
 }
 
 // A message that stores the solver snapshots

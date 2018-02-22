@@ -751,7 +751,8 @@ void Net::BackwardFromToAu(int start, int end, bool apply_update) {
     if (!apply_update) {
       continue;
     }
-    for (int j = 0; j < layers_[i]->blobs().size(); ++j) {
+    //for (int j = 0; j < layers_[i]->blobs().size(); ++j) {
+    for (int j = layers_[i]->blobs().size()-1; j >=0; --j) {
       if (layers_[i]->skip_apply_update(j)) {
         continue;
       }
@@ -761,8 +762,9 @@ void Net::BackwardFromToAu(int start, int end, bool apply_update) {
         int t = (int)learnable_params_[lparam_id]->diff_type();
         for (int type_id = 0; type_id < learnable_types_.size(); ++type_id) {
           if (t == learnable_types_[type_id]) {
+            LOG(INFO) << "push param_id in net: " << lparam_id; 
             //reduction_queue_[type_id].push(lparam_id);
-            push_reducetion_queue(type_id, param_id, time);
+            push_reducetion_queue(type_id, lparam_id, time);
             break;
           }
         }
