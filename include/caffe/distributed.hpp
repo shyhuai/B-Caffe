@@ -147,7 +147,6 @@ class MergedParam {
                 merged_groups_.push_back(group);
                 group_sizes_.push_back(0);
                 num_group_++;
-                LOG(INFO) << "New group!!!!! num_group: " << num_group_;
             } else {
                 group = merged_groups_[num_group_-1];
             }

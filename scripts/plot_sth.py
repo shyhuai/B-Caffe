@@ -34,15 +34,18 @@ def render_log(filename):
     sizes = []
     computes = []
     comms = []
+    merged_comms = []
     for l in f.readlines():
         items = l.split('[')[1][0:-2].split(',')
         items = [float(it.strip()) for it in items]
-        if items[1] < 2048 or int(items[2]) == 0:
+        #if items[1] < 2048 or int(items[2]) == 0:
+        if int(items[2]) == 0:
             continue
         sizes.append(items[1])
         computes.append(items[2])
-        #comms.append(items[3])
-        comms.append(float(items[4]))
+        comms.append(items[3])
+        #comms.append(float(items[4]))
+        #merged_comms.append(items[4])
     f.close()
     #sizes = sizes[::-1]
     #computes = computes[::-1]
@@ -69,8 +72,9 @@ def render_log(filename):
         start_time += comp 
     plt.show()
     plt.clf()
-    #plt.scatter(sizes, comms)
-    #plt.show()
+    plt.scatter(sizes, comms, c='blue')
+    plt.scatter(sizes, computes, c='red')
+    plt.show()
 
 def allreduce_log(filename):
     f = open(filename, 'r')
@@ -113,8 +117,11 @@ if __name__ == '__main__':
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/vgg/tmp2comm.log'
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp2comm.log'
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp4comm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp8comm.log'
-    test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp8ocomm.log'
+    test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp8comm.log'
+    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp8ocomm.log'
+    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmm.log'
+    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/googlenet/tmm.log'
+    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/vgg/tmm.log'
     render_log(test_file)
 
     #test_file = '../logdata/allreduce2.log'

@@ -249,7 +249,7 @@ void DistManager::generate_merged_param()
                     size_t size = overhead->size_;
                     sum_size += size;
                     sum_comm += comm;
-                    double predict_comm = predict_comm_time(sum_size, nranks_);
+                    double predict_comm = predict_comm_time(sum_size * 4, nranks_);
                     LOG(INFO) << "predict_comm: " << predict_comm << ", sum_comp: " << sum_comp << ", sum_comm: " << sum_comm; 
                     if (sum_comp + predict_comm > sum_comm) {
                         j--;
@@ -264,6 +264,7 @@ void DistManager::generate_merged_param()
         }
     }
     //if (rank() == 0) {
+        LOG(INFO) << "=============== " << rank() << " ============";
         merged_param_->print();
     //}
 }
@@ -366,7 +367,8 @@ void DistManager::ReduceLoop(int type_id)
             // 2. Copy from GPU0 (root_solver) to CPU
             allreduce_timer_.Start();
             CUDA_CHECK(cudaSetDevice(gpus_[0]));
-            caffe_gpu_memcpy(count, root_solver_->net()->learnable_params_ptr(type_id)[real_id_from], learnable_params_cpu_);
+            size_t data_size = count * root_solver_->net()->lp_size(real_id_from);
+            caffe_gpu_memcpy(data_size, root_solver_->net()->learnable_params_ptr(type_id)[real_id_from], learnable_params_cpu_);
 
             // 3. MPI_allreduce
             Allreduce(count);
@@ -383,7 +385,7 @@ void DistManager::ReduceLoop(int type_id)
                 int gpu_id = gpus_[i];
                 CUDA_CHECK(cudaSetDevice(gpu_id));
                 //caffe_gpu_memcpy(count, learnable_params_cpu_out_, solver->net()->learnable_params()[real_id_from]->current_mutable_data_memory(true));
-                caffe_gpu_memcpy(count, learnable_params_cpu_out_, solver->net()->learnable_params_ptr(type_id)[real_id_from]);
+                caffe_gpu_memcpy(data_size, learnable_params_cpu_out_, solver->net()->learnable_params_ptr(type_id)[real_id_from]);
             }
 
             for (int i = 0; i < solvers_.size(); ++i) {
@@ -397,7 +399,7 @@ void DistManager::ReduceLoop(int type_id)
         if (id_from == Net::END_OF_ITERATION) {
             iter_++;
             if (benchmark_ && iter_ > 3) {
-                print_overheads();
+                //print_overheads();
                 benchmark_ = false;
                 //generate_merged_param();
             }
