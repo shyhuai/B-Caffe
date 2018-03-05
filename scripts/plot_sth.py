@@ -7,9 +7,12 @@ import os
 import sys
 import argparse
 import math
+from utils import read_log, plot_hist
+
 
 class Bar:
-    def __init__(self, start_time, duration, max_time, ax, type='p'):
+    initialized = False
+    def __init__(self, start_time, duration, max_time, ax, type='p', index=1, is_optimal=False):
         """
         type: p for compute, m for communication
         """
@@ -18,35 +21,55 @@ class Bar:
         self.max_time_ = max_time
         self.duration_ = duration/max_time
         self.type_ = type
-        self.y_ = 0.4 if self.type_ is 'p' else 0.3
-        self.color_ = 'b' if self.type_ is 'p' else 'g'
         self.height_ = 0.1
+        self.start_ = 0.2
+        self.index_ = index
+        self.is_optimal_ = is_optimal
+        self.y_ = self.start_+self.height_ if self.type_ is 'p' else self.start_
+        comp_color = '#2e75b6'
+        comm_color = '#c00000'
+        opt_comm_color = '#c55a11'
+        self.color_ = comp_color if self.type_ is 'p' else comm_color
+        if self.is_optimal_:
+            self.y_ = self.start_-self.height_ - self.height_ * 0.2
+            self.color_ = opt_comm_color 
+        if not Bar.initialized:
+            self.ax_.set_xlim(right=1.05)
+            self.ax_.spines['top'].set_visible(False)
+            self.ax_.spines['right'].set_visible(False)
+            bottom = 0.00#self.start_-self.height_/2
+            self.ax_.set_ylim(bottom=bottom, top=0.5)
+            self.ax_.get_yaxis().set_ticks([])
+            self.ax_.xaxis.set_ticks_position('bottom')
+            self.ax_.set_xticks([i*0.1 for i in range(0,11)])
+            self.ax_.set_xticklabels([str(int(self.max_time_*(i*0.1)/1000)) for i in range(0,11)])
+            self.ax_.arrow(0, 0.05, 1.01, 0., fc='k', ec='k', lw=0.1, color='black', length_includes_head= True, clip_on = False, overhang=0, width=0.0004)
+            self.ax_.annotate(r'$t$ $(ms)$', (1.015, 0.07), color='black',  
+                                    fontsize=18, ha='center', va='center')
+            self.ax_.text(-0.008, self.start_+3*self.height_/2, 'Computation',horizontalalignment='right', color=comp_color, va='center', size=20)
+            self.ax_.text(-0.008, self.start_+self.height_/2, 'Communication\n(WFBP)',horizontalalignment='right', color=comm_color, va='center',size=20)
+            self.ax_.text(-0.008, self.start_-self.height_/2-self.height_*0.2, 'Optimal Comm.\n(GM-WFBP)',horizontalalignment='right', color=opt_comm_color, va='center',size=20)
+        Bar.initialized = True
 
     def render(self):
         x = self.start_time_ / self.max_time_
         y = self.y_
-        rect =  Rectangle((x, y), self.duration_, self.height_, axes=self.ax_, color=self.color_, ec='black')
-        self.ax_.add_patch(rect)
-        return rect
+        if self.duration_ > 0.0:
+            rect =  Rectangle((x, y), self.duration_, self.height_, axes=self.ax_, color=self.color_, ec='black', alpha=0.8)
+            self.ax_.add_patch(rect)
+            fz = 13
+            if str(self.index_).find(',') > 0:
+                fz = 10
+                self.index_ = self.index_.split(',')[0]+'-'+self.index_.split(',')[-1]
+            self.ax_.annotate(str(self.index_), (x, y+0.02), color='black',  
+                                    fontsize=fz, ha='left', va='center')
+        #return rect
 
 def render_log(filename):
-    f = open(filename, 'r')
     sizes = []
     computes = []
     comms = []
-    merged_comms = []
-    for l in f.readlines():
-        items = l.split('[')[1][0:-2].split(',')
-        items = [float(it.strip()) for it in items]
-        #if items[1] < 2048 or int(items[2]) == 0:
-        if int(items[2]) == 0:
-            continue
-        sizes.append(items[1])
-        computes.append(items[2])
-        comms.append(items[3])
-        #comms.append(float(items[4]))
-        #merged_comms.append(items[4])
-    f.close()
+    sizes, comms, computes = read_log(filename)
     #sizes = sizes[::-1]
     #computes = computes[::-1]
     #comms = comms[::-1]
@@ -106,6 +129,30 @@ def plot_allreduce_log(filenames):
     plt.clf()
 
 
+def statastic_gradient_size(filename, label, color, marker):
+    sizes, comms, computes = read_log(filename)
+    plt.scatter(range(1, len(sizes)+1), sizes, c=color, label=label, marker=marker, s=40, facecolors='none', edgecolors=color)
+    #plot_hist(sizes)
+    plt.xlim(left=0)
+    plt.xlabel('Learnable layer ID')
+    plt.ylim(bottom=1e3, top=1e7)
+    plt.ylabel('Message size (bytes)')
+    plt.yscale("log", nonposy='clip')
+    plt.legend()
+
+def statastic_gradient_size_all_cnns():
+    filenames = []
+    for nn in ['googlenet', 'vgg', 'resnet']:
+        f = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/%s/tmp8comm.log' % nn
+        filenames.append(f)
+    cnns = ['GoogleNet', 'VGG', 'ResNet-50']
+    colors = ['r', 'g', 'b']
+    markers = ['^', 'o', 'd']
+    for i, f in enumerate(filenames):
+        statastic_gradient_size(f, cnns[i], colors[i], markers[i])
+    plt.show()
+
+
 if __name__ == '__main__':
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/alexnet/tmpcomm.log'
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/googlenet/tmp2comm.log'
@@ -117,13 +164,15 @@ if __name__ == '__main__':
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/vgg/tmp2comm.log'
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp2comm.log'
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp4comm.log'
-    test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp8comm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp8ocomm.log'
+    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp8comm.log'
+    test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp8ocomm.log'
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmm.log'
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/googlenet/tmm.log'
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/vgg/tmm.log'
-    render_log(test_file)
+    #render_log(test_file)
+    #statastic_gradient_size(test_file)
+    #statastic_gradient_size_all_cnns()
 
     #test_file = '../logdata/allreduce2.log'
     #allreduce_log(test_file)
-    #plot_allreduce_log(['../logdata/allreduce2.log', '../logdata/allreduce4.log','../logdata/allreduce8.log'])
+    plot_allreduce_log(['../logdata/allreduce2.log', '../logdata/allreduce4.log','../logdata/allreduce8.log'])
