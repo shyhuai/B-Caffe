@@ -9,6 +9,8 @@ import argparse
 import math
 from utils import read_log, plot_hist
 
+OUTPUT_PATH = '/media/sf_Shared_Data/tmp/sc18'
+
 
 class Bar:
     initialized = False
@@ -22,17 +24,30 @@ class Bar:
         self.duration_ = duration/max_time
         self.type_ = type
         self.height_ = 0.1
-        self.start_ = 0.2
+        self.start_ = 0.3
         self.index_ = index
         self.is_optimal_ = is_optimal
         self.y_ = self.start_+self.height_ if self.type_ is 'p' else self.start_
         comp_color = '#2e75b6'
         comm_color = '#c00000'
+        synceasgd_color = '#3F5EBA'
         opt_comm_color = '#c55a11'
-        self.color_ = comp_color if self.type_ is 'p' else comm_color
-        if self.is_optimal_:
-            self.y_ = self.start_-self.height_ - self.height_ * 0.2
+        if self.type_ == 'p':
+            self.y_ = self.start_+self.height_
+            self.color_ = comp_color
+        elif self.type_ == 'wc': # WFBP
+            self.y_ = self.start_
+            self.color_ = comm_color
+        elif self.type_ == 'sc': # SyncEASGD
+            self.y_ = self.start_-self.height_
+            self.color_ = synceasgd_color
+        elif self.type_ == 'mc': # MG-WFGP
+            self.y_ = self.start_-2*self.height_-self.height_*0.2
             self.color_ = opt_comm_color 
+        #self.color_ = comp_color if self.type_ is 'p' else comm_color
+        #if self.is_optimal_:
+            #self.y_ = self.start_-self.height_ - self.height_ * 0.2
+            #self.color_ = opt_comm_color 
         if not Bar.initialized:
             self.ax_.set_xlim(right=1.05)
             self.ax_.spines['top'].set_visible(False)
@@ -46,9 +61,11 @@ class Bar:
             self.ax_.arrow(0, 0.05, 1.01, 0., fc='k', ec='k', lw=0.1, color='black', length_includes_head= True, clip_on = False, overhang=0, width=0.0004)
             self.ax_.annotate(r'$t$ $(ms)$', (1.015, 0.07), color='black',  
                                     fontsize=18, ha='center', va='center')
-            self.ax_.text(-0.008, self.start_+3*self.height_/2, 'Computation',horizontalalignment='right', color=comp_color, va='center', size=20)
-            self.ax_.text(-0.008, self.start_+self.height_/2, 'Communication\n(WFBP)',horizontalalignment='right', color=comm_color, va='center',size=20)
-            self.ax_.text(-0.008, self.start_-self.height_/2-self.height_*0.2, 'Optimal Comm.\n(GM-WFBP)',horizontalalignment='right', color=opt_comm_color, va='center',size=20)
+            fontsize = 16
+            self.ax_.text(-0.008, self.start_+3*self.height_/2, 'Comp.',horizontalalignment='right', color=comp_color, va='center', size=fontsize)
+            self.ax_.text(-0.008, self.start_+self.height_/2, 'Comm.\n(WFBP)',horizontalalignment='right', color=comm_color, va='center',size=fontsize)
+            self.ax_.text(-0.008, self.start_-self.height_/2, 'Comm.\n(SyncEASGD)',horizontalalignment='right', color=synceasgd_color, va='center',size=fontsize)
+            self.ax_.text(-0.008, self.start_-self.height_-self.height_/2, 'Comm.\n(GM-WFBP)',horizontalalignment='right', color=opt_comm_color, va='center',size=fontsize)
         Bar.initialized = True
 
     def render(self):
@@ -135,22 +152,29 @@ def statastic_gradient_size(filename, label, color, marker):
     #plot_hist(sizes)
     plt.xlim(left=0)
     plt.xlabel('Learnable layer ID')
-    plt.ylim(bottom=1e3, top=1e7)
-    plt.ylabel('Message size (bytes)')
+    #plt.ylim(bottom=1e3, top=1e7)
+    #plt.ylabel('Message size (bytes)')
+    plt.ylabel('# of parameters')
     plt.yscale("log", nonposy='clip')
     plt.legend()
+    return sizes
 
 def statastic_gradient_size_all_cnns():
     filenames = []
-    for nn in ['googlenet', 'vgg', 'resnet']:
+    for nn in ['googlenet', 'resnet', 'densenet']:
         f = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/%s/tmp8comm.log' % nn
         filenames.append(f)
-    cnns = ['GoogleNet', 'VGG', 'ResNet-50']
+    cnns = ['GoogleNet', 'ResNet-50', 'DenseNet']
     colors = ['r', 'g', 'b']
     markers = ['^', 'o', 'd']
+    sizes = []
     for i, f in enumerate(filenames):
-        statastic_gradient_size(f, cnns[i], colors[i], markers[i])
-    plt.show()
+        s = statastic_gradient_size(f, cnns[i], colors[i], markers[i])
+        sizes.extend(s)
+    #plt.show()
+    plt.savefig('%s/%s.pdf' % (OUTPUT_PATH, 'gradient_distribution'))
+    sizes = np.array(sizes)
+    print(np.max(sizes), np.min(sizes))
 
 
 if __name__ == '__main__':
@@ -171,8 +195,8 @@ if __name__ == '__main__':
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/vgg/tmm.log'
     #render_log(test_file)
     #statastic_gradient_size(test_file)
-    #statastic_gradient_size_all_cnns()
+    statastic_gradient_size_all_cnns()
 
     #test_file = '../logdata/allreduce2.log'
     #allreduce_log(test_file)
-    plot_allreduce_log(['../logdata/allreduce2.log', '../logdata/allreduce4.log','../logdata/allreduce8.log'])
+    #plot_allreduce_log(['../logdata/allreduce2.log', '../logdata/allreduce4.log','../logdata/allreduce8.log'])

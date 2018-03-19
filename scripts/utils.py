@@ -12,7 +12,8 @@ def read_log(filename):
         items = [float(it.strip()) for it in items]
         if int(items[2]) == 0:# or int(items[1]) > 1000000:
             continue
-        sizes.append(float(items[1])*4)
+        #sizes.append(float(items[1])*4)
+        sizes.append(float(items[1]))
         computes.append(items[2])
         #comms.append(items[3])
         comms.append(float(items[4]))

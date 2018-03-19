@@ -4,9 +4,12 @@ import matplotlib.pyplot as plt
 from utils import read_log, plot_hist
 from plot_sth import Bar
 
-OUTPUT_PATH = '/media/sf_Shared_Data/tmp/iwqos'
+OUTPUT_PATH = '/media/sf_Shared_Data/tmp/sc18'
 
-num_of_nodes = [2, 4, 8]
+num_of_nodes = [2, 4, 8, 16]
+#num_of_nodes = [2, 4, 8]
+#num_of_nodes = [8, 80, 81, 82, 83, 85]
+num_of_nodes = [16, 32, 64]
 B = 9.37 * 1024 * 1024 * 1024.0 / 8 # 10 Gbps Ethernet
 #B = 56 * 1024 * 1024 * 1024.0 / 8 # 56 Gbps IB
 markers = {2:'o',
@@ -19,8 +22,21 @@ def time_of_allreduce(n, M, B=B):
     M: size of message
     B: bandwidth of link
     """
+    # Model 1, TernGrad, NIPS2017
     #if True:
-    #    return 4. + 2. * M
+    #    ncost = 100 * 1e-6
+    #    nwd = B
+    #    return ncost * np.log2(n) + M / nwd * np.log2(n) 
+
+    # Model 2, Lower bound, E. Chan, et al., 2007
+    if True:
+        #alpha = 50.0*1e-6
+        alpha = 7.2*1e-6 #Yang 2017, SC17, Scaling Deep Learning on GPU and Knights Landing clusters
+        beta =  1 / B
+        gamma = 1.0 / (16.0 * 1e9  * 4 / 2)
+        M = 4*M
+        t = 2*n*alpha + 2*(n-1)*M*beta/n + (n-1)*M*gamma/n
+        return t * 1e6
     ts = 7.5/ (1000.0 * 1000)# startup time in second
     #seconds = (np.ceil(np.log2(n)) + n - 1) * ts + (2*n - 1 + n-1) * M / n * 1/B 
     #seconds = (np.ceil(np.log2(n)) + n - 1) * ts + 2 * (n - 1) * 2*M/n * 1/B
@@ -43,7 +59,7 @@ def time_of_allreduce(n, M, B=B):
 
 
 class Simulator():
-    def __init__(self, name, computes, sizes, num_of_nodes):
+    def __init__(self, name, computes, sizes, num_of_nodes, render=True):
         self.name = name
         self.computes = computes
         self.sizes = sizes
@@ -52,8 +68,7 @@ class Simulator():
         self.title = name + ' (WFBP)'
         self.max_time = 0
         self.ax = None
-
-
+        self.render = render
 
     def wfbp(self, with_optimal=False):
         start_time = 0.0
@@ -66,7 +81,7 @@ class Simulator():
         max_time = max(np.sum(self.computes), np.sum(comms)+self.computes[0])
         if not with_optimal:
             self.max_time = max_time
-        if not self.ax:
+        if not self.ax and self.render:
             fig, ax = plt.subplots(1, figsize=(30, 3))
             #ax.set_title(self.title, x=0.5, y=0.8)
             self.ax = ax
@@ -75,8 +90,9 @@ class Simulator():
             comp = self.computes[i]
             layer_id = len(self.computes) - i
             if not with_optimal:
-                bar = Bar(start_time, comp, self.max_time, self.ax, type='p', index=layer_id)
-                bar.render()
+                if self.render:
+                    bar = Bar(start_time, comp, self.max_time, self.ax, type='p', index=layer_id)
+                    bar.render()
             if comm_start_time + comm > start_time + comp:
                 comm_start_time = comm_start_time + comm
             else:
@@ -87,13 +103,37 @@ class Simulator():
                 comm_layer_id = str(layer_id)
 
             comm = comms[i]
-            bar_m = Bar(comm_start_time, comm, self.max_time, self.ax, type='m', index=comm_layer_id, is_optimal=with_optimal)
-            bar_m.render()
+            type = 'wc'
+            if with_optimal:
+                type = 'mc'
+            if self.render:
+                bar_m = Bar(comm_start_time, comm, self.max_time, self.ax, type=type, index=comm_layer_id, is_optimal=with_optimal)
+                bar_m.render()
             start_time += comp 
         total_time = (comm_start_time + comm)/1000.0
         print('Total time: ', total_time, ' ms')
-        plt.subplots_adjust(left=0.08, right=1.)
+        if self.render:
+            plt.subplots_adjust(left=0.06, right=1.)
         return total_time
+
+    def synceasgd(self):
+        start_time = 0.0
+        comm_start_time = 0.0
+        comm = 0.0
+        total_size = np.sum(self.sizes)
+        comm = time_of_allreduce(self.num_of_nodes, total_size, B)
+        total_comp = np.sum(self.computes)
+        comm_start_time = total_comp
+        index = ','.join([str(len(self.computes)-i) for i in range(0, len(self.computes))])
+        if self.render:
+            bar = Bar(np.sum(self.computes), comm, self.max_time, self.ax, type='sc', index=index)
+            bar.render()
+        total_time = (comm_start_time + comm)/1000.0
+        print('Total time: ', total_time, ' ms')
+        if self.render:
+            pass
+        return total_time
+
 
 
     def _search_unmerged(self, start_idx, end_idx, computes, comms, flags):
@@ -130,7 +170,7 @@ class Simulator():
         i = start_idx
         start_comp_time = computes[i]
         start_comm_time = comms[i-1] + comm_start
-        assert(start_comm_time > start_comp_time, 'Error!!, start_comm_time should be larger than start_comp_time')
+        assert start_comm_time > start_comp_time, 'Error!!, start_comm_time should be larger than start_comp_time'
         sum_size = self.sizes[i-1]
         i += 1
         while i < end_idx:
@@ -214,7 +254,7 @@ class Simulator():
         comms[i+1] = p
         sizes[i+1] = merge_size 
         start_comms = self.cal_comm_starts(comms, comps)
-        print('start_comms: ', start_comms)
+        #print('start_comms: ', start_comms)
         return start_comms
 
     def gmwfbp2(self):
@@ -259,6 +299,7 @@ class Simulator():
             sum_comp += comp
         optimal_comms.append(comms[-1])
         self.wfbp()
+        self.synceasgd()
         self.comms = optimal_comms
         self.title = self.name+ ' (GM-WFBP)'
         ret = self.wfbp(with_optimal=True)
@@ -278,8 +319,8 @@ def read_allreduce_log(filename):
         size = int(items[0])
         #if size > 2e3:
         #    break
-        #if size < 1e3 or size > 5e5:
-        #    continue
+        if size < 2048 or size > 2e5:
+            continue
         #num_of_nodes = int(items[0].split(',')[0])
         comms.append(comm)
         sizes.append(size)
@@ -292,52 +333,128 @@ def read_allreduce_log(filename):
 
 def predict(filename, n, color, marker, label, sizes=None):
     #sizes, comms, comps = read_log(filename)
-    if not sizes:
+    if sizes is None:
         sizes, comms, comps = read_allreduce_log(filename)
     #plt.scatter(range(1, len(sizes)+1), sizes, c=color, label=label, marker=marker, s=40, facecolors='none', edgecolors=color)
-        #plt.plot(sizes, comms, c=color, marker=marker, label=label+' measured', linewidth=2)
-        plt.plot(sizes, comms, c=color, marker=marker, label=label, linewidth=2)
+        plt.plot(sizes, comms, c=color, marker=marker, label=label+' measured', linewidth=2)
+        #plt.plot(sizes, comms, c=color, marker=marker, label=label, linewidth=2)
+    #bandwidths = np.array(sizes)/np.array(comms)
+    #plt.plot(sizes, bandwidths, c=color, marker=marker, label=label, linewidth=2)
     predicts = []
     for M in sizes:
        p = time_of_allreduce(n, M, B) 
        predicts.append(p)
-    rerror = (np.array(predicts)-np.array(comms))/np.array(comms)
-    print('erro: ', np.mean(np.abs(rerror)))
+    #rerror = (np.array(predicts)-np.array(comms))/np.array(comms)
+    #print('erro: ', np.mean(np.abs(rerror)))
     #plt.scatter(sizes, predicts, c='red', marker=markers[n])
-    #plt.plot(sizes, predicts, c=color, marker=marker, linestyle='--', label=label+' predict', markerfacecolor='white', linewidth=2)
+    plt.plot(sizes, predicts, c=color, marker=marker, linestyle='--', label=label+' predict', markerfacecolor='white', linewidth=2)
     return sizes
 
 def plot_all_communication_overheads():
-    labels = ['2-node', '4-node', '8-node']
-    colors = ['r', 'g', 'b', 'black']
-    markers = ['^', 'o', 'd', '*']
+    #labels = ['2-node', '4-node', '8-node', '16-node']
+    labels = ['%d-node' % i for i in num_of_nodes]
+    colors = ['r', 'g', 'b', 'black', 'y', 'c']
+    markers = ['^', 'o', 'd', '*', 'x', 'v']
     sizes = None
+    sizes = np.arange(128.0, 2e5, step=8192)
     for i, n in enumerate(num_of_nodes):
-        test_file = '/media/sf_Shared_Data/gpuhome/repositories/mpibench/allreduce%d.log' % n 
-        sizes = predict(test_file, n, colors[i], markers[i], labels[i])
-    #predict(test_file, 16, colors[i], markers[i], labels[i], sizes)
+        #test_file = '/media/sf_Shared_Data/gpuhome/repositories/mpibench/allreduce%d.log' % n 
+        #test_file = '/media/sf_Shared_Data/gpuhome/repositories/mpibench/t716/allreduce%d.log' % n  # 1Gbps
+        test_file = '/media/sf_Shared_Data/gpuhome/repositories/mpibench/t716/ompi2.1log/allreduce%d.log' % n  # 1Gbps
+        #test_file = '/media/sf_Shared_Data/gpuhome/repositories/mpibench/t716/ompi3.0log/allreduce%d.log' % n  # 1Gbps
+        #sizes = predict(test_file, n, colors[i], markers[i], labels[i])
+        predict(test_file, n, colors[i], markers[i], labels[i], sizes)
     #plt.xlim(left=0)
-    plt.xlabel('Message size (bytes)')
+    #plt.xlabel('Message size (bytes)')
+    plt.xlabel('# of parameters')
     plt.ylabel(r'Latency ($\mu$s)')
-    plt.ylim(top=plt.ylim()[1]+200)
+    plt.ylim(bottom=0, top=plt.ylim()[1]+200)
     #plt.xscale("log", nonposy='clip')
     plt.legend(ncol=1, loc=2)
-    plt.savefig('%s/%s.pdf' % (OUTPUT_PATH, 'allreduceperf'))
-    plt.show()
+    plt.savefig('%s/%s.pdf' % (OUTPUT_PATH, 'commtime'))
+    #plt.show()
 
 def gmwfbp_simulate():
-    #name = 'GoogleNet'
+    name = 'GoogleNet'
     #name = 'ResNet'
-    name = 'VGG'
+    #name = 'VGG'
+    #name = 'DenseNet'
     num_of_nodes = 32
     test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/%s/tmp8comm.log' % name.lower()
     sizes, comms, computes = read_log(test_file)
+    computes = [c/4 for c in computes]
     #sizes = [1., 1., 1., 1.]
     #computes = [3., 3.5, 5., 6.]
     #sim = Simulator(name, computes[0:4], sizes[0:4], num_of_nodes)
     sim = Simulator(name, computes, sizes, num_of_nodes)
     #sim.wfbp()
     sim.gmwfbp2()
+    plt.savefig('%s/breakdown%s.pdf' % (OUTPUT_PATH, name.lower()))
+    #plt.show()
+
+def gmwfbp_speedup():
+    #configs = ['GoogleNet', 128]
+    configs = ['ResNet', 128]
+    #configs = ['DenseNet', 128]
+    name = configs[0] 
+    b = configs[1]
+    test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/%s/tmp8comm.log' % name.lower()
+    sizes, comms, computes = read_log(test_file)
+    device = 'p100'
+    #device = 'k80'
+    computes = [c/4 for c in computes] # P100
+    nnodes = [4, 8, 16, 32, 64, 80]
+    wfbps = []
+    gmwfbps = []
+    synceasgds = []
+    micomputes = np.array(computes)
+    tf = np.sum(micomputes) * 0.5 / 1000
+    tb = np.sum(micomputes) / 1000
+    total_size = np.sum(sizes)
+    single = b/(tf+tb)
+    optimal = []
+    colors = ['k', 'r', 'g', 'b']
+    markers = ['s', '^', 'o', 'd']
+    for num_of_nodes in nnodes:
+        sim = Simulator(name, computes, sizes, num_of_nodes, render=False)
+        wfbp = sim.wfbp()
+        wfbps.append(b*num_of_nodes/(wfbp+tf)/single)
+        gmwfbp = sim.gmwfbp2()
+        gmwfbps.append(b*num_of_nodes/(gmwfbp+tf)/single)
+        tc = time_of_allreduce(num_of_nodes, total_size, B)/1000
+        print('tc: ', tc) 
+        synceasgd = tb + tf + tc
+        synceasgds.append(b*num_of_nodes/synceasgd/single)
+        optimal.append(num_of_nodes)
+    print('tf: ', tf)
+    print('tb: ', tb) 
+    print('total_size: ', total_size)
+    print('wfbp: ', wfbps)
+    print('gmwfbps: ', gmwfbps)
+    print('synceasgds: ', synceasgds)
+    plt.plot(nnodes, optimal, color='k', marker='s', label='Linear')
+    plt.plot(nnodes, wfbps, color='r', marker='d', label='WFBP')
+    plt.plot(nnodes, synceasgds, color='b', marker='o', label='SyncEASGD')
+    plt.plot(nnodes, gmwfbps, color='g', marker='^', label='MG-WFBP')
+    print(np.array(gmwfbps)/np.array(synceasgds))
+    #plt.yscale('log', basey=2)
+    #plt.xscale('log', basey=2)
+    plt.legend(loc=2)
+    plt.xlabel('# of nodes')
+    plt.ylabel('Speedup')
+    plt.xticks(nnodes)
+    plt.yticks(nnodes)
+    plt.grid(color='#5e5c5c', linestyle='-.', linewidth=1)
+    plt.savefig('%s/speedup%s.pdf' % (OUTPUT_PATH, name.lower()+device))
+    #plt.show()
+
+def draw_ssgd_speedup():
+    Ns = [8, 16, 32, 64]
+    r = np.arange(0, 4, step=0.1)
+    for N in Ns:
+        s = N / (1+r)
+        plt.plot(r, s)
+    #plt.yscale('log', basey=2)
     plt.show()
 
 
@@ -348,4 +465,6 @@ if __name__ == '__main__':
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/mpibench/allgather%d.log' % num_of_nodes 
     #plot_all_communication_overheads()
     gmwfbp_simulate()
+    #gmwfbp_speedup()
+    #draw_ssgd_speedup()
 
