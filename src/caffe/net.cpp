@@ -762,7 +762,7 @@ void Net::BackwardFromToAu(int start, int end, bool apply_update) {
         int t = (int)learnable_params_[lparam_id]->diff_type();
         for (int type_id = 0; type_id < learnable_types_.size(); ++type_id) {
           if (t == learnable_types_[type_id]) {
-            LOG(INFO) << "push param_id in net: " << lparam_id; 
+            //LOG(INFO) << "push param_id in net: " << lparam_id; 
             //reduction_queue_[type_id].push(lparam_id);
             push_reducetion_queue(type_id, lparam_id, time);
             break;

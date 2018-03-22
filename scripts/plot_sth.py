@@ -7,9 +7,14 @@ import os
 import sys
 import argparse
 import math
-from utils import read_log, plot_hist
+from utils import read_log, plot_hist, update_fontsize
 
 OUTPUT_PATH = '/media/sf_Shared_Data/tmp/sc18'
+
+comp_color = '#2e75b6'
+comm_color = '#c00000'
+synceasgd_color = '#3F5EBA'
+opt_comm_color = '#c55a11'
 
 
 class Bar:
@@ -28,10 +33,6 @@ class Bar:
         self.index_ = index
         self.is_optimal_ = is_optimal
         self.y_ = self.start_+self.height_ if self.type_ is 'p' else self.start_
-        comp_color = '#2e75b6'
-        comm_color = '#c00000'
-        synceasgd_color = '#3F5EBA'
-        opt_comm_color = '#c55a11'
         if self.type_ == 'p':
             self.y_ = self.start_+self.height_
             self.color_ = comp_color
@@ -60,12 +61,13 @@ class Bar:
             self.ax_.set_xticklabels([str(int(self.max_time_*(i*0.1)/1000)) for i in range(0,11)])
             self.ax_.arrow(0, 0.05, 1.01, 0., fc='k', ec='k', lw=0.1, color='black', length_includes_head= True, clip_on = False, overhang=0, width=0.0004)
             self.ax_.annotate(r'$t$ $(ms)$', (1.015, 0.07), color='black',  
-                                    fontsize=18, ha='center', va='center')
-            fontsize = 16
-            self.ax_.text(-0.008, self.start_+3*self.height_/2, 'Comp.',horizontalalignment='right', color=comp_color, va='center', size=fontsize)
-            self.ax_.text(-0.008, self.start_+self.height_/2, 'Comm.\n(WFBP)',horizontalalignment='right', color=comm_color, va='center',size=fontsize)
-            self.ax_.text(-0.008, self.start_-self.height_/2, 'Comm.\n(SyncEASGD)',horizontalalignment='right', color=synceasgd_color, va='center',size=fontsize)
-            self.ax_.text(-0.008, self.start_-self.height_-self.height_/2, 'Comm.\n(GM-WFBP)',horizontalalignment='right', color=opt_comm_color, va='center',size=fontsize)
+                                    fontsize=20, ha='center', va='center')
+            fontsize = 18 
+            left_margin = 0.
+            self.ax_.text(left_margin, self.start_+3*self.height_/2, 'Comp.',horizontalalignment='right', color='black', va='center', size=fontsize)
+            self.ax_.text(left_margin, self.start_+self.height_/2, 'Comm.(WF.)',horizontalalignment='right', color='black', va='center',size=fontsize)
+            self.ax_.text(left_margin, self.start_-self.height_/2, 'Comm.(S.E.)',horizontalalignment='right', color='black', va='center',size=fontsize)
+            self.ax_.text(left_margin, self.start_-self.height_-self.height_/2, 'Comm.(G.W.)',horizontalalignment='right', color='black', va='center',size=fontsize)
         Bar.initialized = True
 
     def render(self):
@@ -74,9 +76,9 @@ class Bar:
         if self.duration_ > 0.0:
             rect =  Rectangle((x, y), self.duration_, self.height_, axes=self.ax_, color=self.color_, ec='black', alpha=0.8)
             self.ax_.add_patch(rect)
-            fz = 13
+            fz = 16
             if str(self.index_).find(',') > 0:
-                fz = 10
+                fz = 16
                 self.index_ = self.index_.split(',')[0]+'-'+self.index_.split(',')[-1]
             self.ax_.annotate(str(self.index_), (x, y+0.02), color='black',  
                                     fontsize=fz, ha='left', va='center')
@@ -86,7 +88,7 @@ def render_log(filename):
     sizes = []
     computes = []
     comms = []
-    sizes, comms, computes = read_log(filename)
+    sizes, comms, computes, merged_comms = read_log(filename)
     #sizes = sizes[::-1]
     #computes = computes[::-1]
     #comms = comms[::-1]
@@ -131,9 +133,9 @@ def allreduce_log(filename):
         comms.append(comm)
         sizes.append(size)
     f.close()
-    print('num_of_nodes: ', num_of_nodes)
-    print('sizes: ', sizes)
-    print('comms: ', comms)
+    #print('num_of_nodes: ', num_of_nodes)
+    #print('sizes: ', sizes)
+    #print('comms: ', comms)
     return num_of_nodes, sizes, comms
 
 
@@ -145,18 +147,24 @@ def plot_allreduce_log(filenames):
     plt.show()
     plt.clf()
 
-
+ax = None
 def statastic_gradient_size(filename, label, color, marker):
-    sizes, comms, computes = read_log(filename)
-    plt.scatter(range(1, len(sizes)+1), sizes, c=color, label=label, marker=marker, s=40, facecolors='none', edgecolors=color)
+    global ax
+    sizes, comms, computes, merged_comms = read_log(filename)
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(5,4.5))
+    fontsize = 14 
+    ax.scatter(range(1, len(sizes)+1), sizes, c=color, label=label, marker=marker, s=40, facecolors='none', edgecolors=color)
     #plot_hist(sizes)
-    plt.xlim(left=0)
-    plt.xlabel('Learnable layer ID')
+    ax.set_xlim(left=0)
+    ax.set_xlabel('Learnable layer ID')
     #plt.ylim(bottom=1e3, top=1e7)
     #plt.ylabel('Message size (bytes)')
-    plt.ylabel('# of parameters')
-    plt.yscale("log", nonposy='clip')
-    plt.legend()
+    ax.set_ylabel('# of parameters')
+    ax.set_yscale("log", nonposy='clip')
+    ax.legend()
+    update_fontsize(ax, fontsize)
+    print('total size: ', np.sum(sizes))
     return sizes
 
 def statastic_gradient_size_all_cnns():
@@ -164,39 +172,25 @@ def statastic_gradient_size_all_cnns():
     for nn in ['googlenet', 'resnet', 'densenet']:
         f = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/%s/tmp8comm.log' % nn
         filenames.append(f)
-    cnns = ['GoogleNet', 'ResNet-50', 'DenseNet']
+    #cnns = ['GoogleNet', 'ResNet-50', 'DenseNet']
+    cnns = ['GoogleNet', 'ResNet-50']
     colors = ['r', 'g', 'b']
-    markers = ['^', 'o', 'd']
+    markers = ['+', 'x', 'd']
     sizes = []
     for i, f in enumerate(filenames):
+        if i >= len(cnns):
+            break
         s = statastic_gradient_size(f, cnns[i], colors[i], markers[i])
         sizes.extend(s)
-    #plt.show()
-    plt.savefig('%s/%s.pdf' % (OUTPUT_PATH, 'gradient_distribution'))
+    #plt.subplots_adjust(left=0.16, bottom=0.13, top=0.93, right=0.96)
+    plt.subplots_adjust(left=0.18, bottom=0.13, top=0.91, right=0.92)
+    plt.show()
+    #plt.savefig('%s/%s.pdf' % (OUTPUT_PATH, 'gradient_distribution'))
     sizes = np.array(sizes)
     print(np.max(sizes), np.min(sizes))
 
 
 if __name__ == '__main__':
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/alexnet/tmpcomm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/googlenet/tmp2comm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/googlenet/tmp4comm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/googlenet/tmp8comm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/googlenet/tmp8ocomm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/vgg/tmp8comm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/vgg/tmp4comm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/vgg/tmp2comm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp2comm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp4comm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp8comm.log'
-    test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmp8ocomm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/resnet/tmm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/googlenet/tmm.log'
-    #test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/vgg/tmm.log'
     #render_log(test_file)
     #statastic_gradient_size(test_file)
     statastic_gradient_size_all_cnns()
-
-    #test_file = '../logdata/allreduce2.log'
-    #allreduce_log(test_file)
-    #plot_allreduce_log(['../logdata/allreduce2.log', '../logdata/allreduce4.log','../logdata/allreduce8.log'])

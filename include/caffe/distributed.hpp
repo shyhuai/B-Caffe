@@ -74,6 +74,12 @@ class DistManager {
   MergedParam* merged_param_;
   map<int, int> start_param_map_; // [orignal_param_id] = layer_start_param_id;
 
+  // For merged-gradient layers: M
+  std::set<int> M_;
+  int count_;
+  void comm_start(const vector<double> &tc, const vector<double> &tb, const vector<double> &taub, int L, vector<double> &tauc);
+  double allreduce_time(size_t size);
+
 }; // class DistManager
 
 

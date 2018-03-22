@@ -1,16 +1,17 @@
 from __future__ import print_function
 import numpy as np
 import matplotlib.pyplot as plt
-from utils import read_log, plot_hist
+from utils import read_log, plot_hist, update_fontsize, autolabel, read_p100_log
 from plot_sth import Bar
+import plot_sth as Color
 
 OUTPUT_PATH = '/media/sf_Shared_Data/tmp/sc18'
 
 num_of_nodes = [2, 4, 8, 16]
-#num_of_nodes = [2, 4, 8]
+num_of_nodes = [2, 4, 8]
 #num_of_nodes = [8, 80, 81, 82, 83, 85]
-num_of_nodes = [16, 32, 64]
-B = 9.37 * 1024 * 1024 * 1024.0 / 8 # 10 Gbps Ethernet
+#num_of_nodes = [16, 32, 64]
+B = 9.0 * 1024 * 1024 * 1024.0 / 8 # 10 Gbps Ethernet
 #B = 56 * 1024 * 1024 * 1024.0 / 8 # 56 Gbps IB
 markers = {2:'o',
         4:'x',
@@ -30,12 +31,14 @@ def time_of_allreduce(n, M, B=B):
 
     # Model 2, Lower bound, E. Chan, et al., 2007
     if True:
-        #alpha = 50.0*1e-6
-        alpha = 7.2*1e-6 #Yang 2017, SC17, Scaling Deep Learning on GPU and Knights Landing clusters
-        beta =  1 / B
-        gamma = 1.0 / (16.0 * 1e9  * 4 / 2)
+        #alpha = 7.2*1e-6 #Yang 2017, SC17, Scaling Deep Learning on GPU and Knights Landing clusters
+        #alpha = 6.25*1e-6*n # From the data gpuhome benchmark
+        #alpha = 12*1e-6*n # From the data gpuhome benchmark
+        alpha = 45.25*1e-6#*np.log2(n) # From the data gpuhome benchmark
+        beta =  1 / B *1.2
+        gamma = 1.0 / (16.0 * 1e9  * 4) * 160
         M = 4*M
-        t = 2*n*alpha + 2*(n-1)*M*beta/n + (n-1)*M*gamma/n
+        t = 2*(n)*alpha + 2*(n-1)*M*beta/n + (n-1)*M*gamma/n
         return t * 1e6
     ts = 7.5/ (1000.0 * 1000)# startup time in second
     #seconds = (np.ceil(np.log2(n)) + n - 1) * ts + (2*n - 1 + n-1) * M / n * 1/B 
@@ -69,6 +72,7 @@ class Simulator():
         self.max_time = 0
         self.ax = None
         self.render = render
+        self.merged_layers = []
 
     def wfbp(self, with_optimal=False):
         start_time = 0.0
@@ -136,102 +140,6 @@ class Simulator():
 
 
 
-    def _search_unmerged(self, start_idx, end_idx, computes, comms, flags):
-        """
-        start_idx should not less than 1
-        flags all false values, means all are bad cases
-        """
-        if start_idx == end_idx:
-            return -1  # End, no need to merge 
-        i = start_idx
-        start_comp_time = computes[i-1] 
-        start_comm_time = computes[i-1]
-        optimal_found = False
-        while i < end_idx:
-            comm = comms[i-1]
-            comp = computes[i]
-            print('comm=%f, comp=%f'%(comm, comp))
-            if start_comm_time + comm > start_comp_time + comp:
-                start_comm_time += comm# bad case, need to merge
-            else:
-                # optimal case
-                for j in range(start_idx-1, i):
-                    flags[j] = True # found
-                optimal_found = True
-                print('optimal found at ', i)
-                return i+1
-            start_comp_time += comp 
-            i += 1
-        return start_idx # this is bad case
-
-    def _merge_gradients(self, start_idx, end_idx, computes, comms, flags, comm_start=0.0):
-        if start_idx >= end_idx:
-            return start_idx 
-        i = start_idx
-        start_comp_time = computes[i]
-        start_comm_time = comms[i-1] + comm_start
-        assert start_comm_time > start_comp_time, 'Error!!, start_comm_time should be larger than start_comp_time'
-        sum_size = self.sizes[i-1]
-        i += 1
-        while i < end_idx:
-            comm = comms[i-1]
-            comp = computes[i]
-            size = self.sizes[i-1]
-            sum_size += size
-            ptime = time_of_allreduce(self.num_of_nodes, sum_size, B)
-            print('[%d]ptime: %f, start_comp_time: %f, start_comm_time: %f, comm: %f, sum_size:%f'% (i, ptime, start_comp_time, start_comm_time, comm, sum_size))
-
-            if ptime + start_comp_time < start_comm_time + comm:
-                # Merge
-                comms[i-2] = 0.0
-                comms[i-1] = ptime
-                print('Merged i: ', i-2)
-                
-                #self.sizes[i-1] += self.sizes[i-2] 
-                #self.sizes[i-2] = 0.0
-                if ptime <= comp:
-                    print('Case 3: optimal')
-                    for j in range(start_idx-1, i):
-                        flags[i] = True
-                    return i+1
-                else:
-                    print('Case 4: partially optimal')
-                    new_comm_start = max(ptime+start_comm_time-(start_comp_time+comp) , 0)
-                    i = self._merge_gradients(i+1, end_idx, computes, comms, flags, new_comm_start)
-                    #i = self._merge_gradients(i, end_idx, computes, comms, flags)
-            else:
-                i = self._merge_gradients(i+1, end_idx, computes, comms, flags, comm_start=start_comm_time-start_comp_time)
-        return i
-
-    def gmwfbp(self):
-        # Merge gradients
-        num_of_layers = len(self.computes)
-        flags = [False for i in self.computes]
-        comms = [time_of_allreduce(self.num_of_nodes, s, B) for s in self.sizes]
-        #comms = [100.0 for i in self.computes] 
-        print('flags: ', flags)
-        print('sizes: ', self.sizes)
-        print('comms: ', comms)
-        print('computes: ', self.computes)
-        optimal_comms = list(comms)
-        i = 1
-        while i < num_of_layers:
-            idx = self._search_unmerged(i, num_of_layers, self.computes, optimal_comms, flags)
-            if idx == i:
-                #Not found
-                i = self._merge_gradients(i, num_of_layers, self.computes, optimal_comms, flags)
-            else:
-                i = idx
-        print('idx: ', idx)
-        print('flags: ', flags)
-        print('optimal_comms: ', optimal_comms)
-        self.wfbp()
-        self.comms = optimal_comms
-        self.title = self.name+ ' (GM-WFBP)'
-        ret = self.wfbp(with_optimal=True)
-        plt.savefig('%s/%s.pdf' % (OUTPUT_PATH, self.name.lower()+'_n%d'%self.num_of_nodes))
-        return ret
-
     def cal_comm_starts(self, comms, comps):
         """
         comms and comps have been aligned
@@ -255,6 +163,7 @@ class Simulator():
         sizes[i+1] = merge_size 
         start_comms = self.cal_comm_starts(comms, comps)
         #print('start_comms: ', start_comms)
+        self.merged_layers.append(i)
         return start_comms
 
     def gmwfbp2(self):
@@ -264,7 +173,7 @@ class Simulator():
             comms = self.comms
 
         #comms = comms[0:-1]
-        print('comms: ', comms)
+        #print('comms: ', comms)
         comps = self.computes[1:]
         comps.append(0) # for last communication
 
@@ -272,7 +181,7 @@ class Simulator():
         optimal_sizes = list(self.sizes)
         start_comms = self.cal_comm_starts(optimal_comms, comps)
         sum_comp = 0.0
-        print('start_comms: ', start_comms)
+        #print('start_comms: ', start_comms)
         #return
 
         for i in range(0, len(comms)-1):
@@ -303,6 +212,7 @@ class Simulator():
         self.comms = optimal_comms
         self.title = self.name+ ' (GM-WFBP)'
         ret = self.wfbp(with_optimal=True)
+        #print('merged-layers: ', self.merged_layers)
         return ret
 
 
@@ -316,23 +226,25 @@ def read_allreduce_log(filename):
         items = ' '.join(l.split()).split()
         comm = float(items[-1])
         #size = int(items[0].split(',')[1])
-        size = int(items[0])
+        size = int(items[0])/4
         #if size > 2e3:
         #    break
-        if size < 2048 or size > 2e5:
+        if size < 2048 or size > 2e4:
             continue
         #num_of_nodes = int(items[0].split(',')[0])
         comms.append(comm)
         sizes.append(size)
     f.close()
     #print('num_of_nodes: ', num_of_nodes)
-    print('sizes: ', sizes)
-    print('comms: ', comms)
+    #print('sizes: ', sizes)
+    #print('comms: ', comms)
     return sizes, comms, []
 
 
-def predict(filename, n, color, marker, label, sizes=None):
-    #sizes, comms, comps = read_log(filename)
+def predict(filename, n, color, marker, label, sizes=None, ax=None):
+    #sizes, comms, comps, merged_comms = read_log(filename)
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(5,4.5))
     if sizes is None:
         sizes, comms, comps = read_allreduce_log(filename)
     #plt.scatter(range(1, len(sizes)+1), sizes, c=color, label=label, marker=marker, s=40, facecolors='none', edgecolors=color)
@@ -347,32 +259,36 @@ def predict(filename, n, color, marker, label, sizes=None):
     #rerror = (np.array(predicts)-np.array(comms))/np.array(comms)
     #print('erro: ', np.mean(np.abs(rerror)))
     #plt.scatter(sizes, predicts, c='red', marker=markers[n])
-    plt.plot(sizes, predicts, c=color, marker=marker, linestyle='--', label=label+' predict', markerfacecolor='white', linewidth=2)
+    ax.plot(sizes, predicts, c=color, marker=marker, linestyle='--', label=label+' predict', markerfacecolor='white', linewidth=1)
     return sizes
 
 def plot_all_communication_overheads():
     #labels = ['2-node', '4-node', '8-node', '16-node']
+    fig, ax = plt.subplots(figsize=(5,4.5))
     labels = ['%d-node' % i for i in num_of_nodes]
     colors = ['r', 'g', 'b', 'black', 'y', 'c']
     markers = ['^', 'o', 'd', '*', 'x', 'v']
     sizes = None
-    sizes = np.arange(128.0, 2e5, step=8192)
+    sizes = np.arange(128.0, 1e5, step=8192)
     for i, n in enumerate(num_of_nodes):
-        #test_file = '/media/sf_Shared_Data/gpuhome/repositories/mpibench/allreduce%d.log' % n 
+        test_file = '/media/sf_Shared_Data/gpuhome/repositories/mpibench/allreduce%d.log' % n 
         #test_file = '/media/sf_Shared_Data/gpuhome/repositories/mpibench/t716/allreduce%d.log' % n  # 1Gbps
-        test_file = '/media/sf_Shared_Data/gpuhome/repositories/mpibench/t716/ompi2.1log/allreduce%d.log' % n  # 1Gbps
+        #test_file = '/media/sf_Shared_Data/gpuhome/repositories/mpibench/t716/ompi2.1log/allreduce%d.log' % n  # 1Gbps
         #test_file = '/media/sf_Shared_Data/gpuhome/repositories/mpibench/t716/ompi3.0log/allreduce%d.log' % n  # 1Gbps
         #sizes = predict(test_file, n, colors[i], markers[i], labels[i])
-        predict(test_file, n, colors[i], markers[i], labels[i], sizes)
+        predict(test_file, n, colors[i], markers[i], labels[i], sizes, ax)
     #plt.xlim(left=0)
     #plt.xlabel('Message size (bytes)')
+    #ax.ticklabel_format(style='sci',axis='x')
     plt.xlabel('# of parameters')
     plt.ylabel(r'Latency ($\mu$s)')
     plt.ylim(bottom=0, top=plt.ylim()[1]+200)
     #plt.xscale("log", nonposy='clip')
     plt.legend(ncol=1, loc=2)
-    plt.savefig('%s/%s.pdf' % (OUTPUT_PATH, 'commtime'))
-    #plt.show()
+    update_fontsize(ax, fontsize=14)
+    plt.subplots_adjust(left=0.18, bottom=0.13, top=0.91, right=0.92)
+    #plt.savefig('%s/%s.pdf' % (OUTPUT_PATH, 'commtime'))
+    plt.show()
 
 def gmwfbp_simulate():
     name = 'GoogleNet'
@@ -381,8 +297,8 @@ def gmwfbp_simulate():
     #name = 'DenseNet'
     num_of_nodes = 32
     test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/%s/tmp8comm.log' % name.lower()
-    sizes, comms, computes = read_log(test_file)
-    computes = [c/4 for c in computes]
+    sizes, comms, computes, merged_comms = read_log(test_file)
+    #computes = [c/4 for c in computes]
     #sizes = [1., 1., 1., 1.]
     #computes = [3., 3.5, 5., 6.]
     #sim = Simulator(name, computes[0:4], sizes[0:4], num_of_nodes)
@@ -393,17 +309,24 @@ def gmwfbp_simulate():
     #plt.show()
 
 def gmwfbp_speedup():
-    #configs = ['GoogleNet', 128]
-    configs = ['ResNet', 128]
+    #configs = ['GoogleNet', 64]
+    configs = ['ResNet', 32]
     #configs = ['DenseNet', 128]
     name = configs[0] 
     b = configs[1]
     test_file = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/%s/tmp8comm.log' % name.lower()
-    sizes, comms, computes = read_log(test_file)
+    sizes, comms, computes, merged_comms = read_log(test_file)
+    device = 'k80'
+
     device = 'p100'
-    #device = 'k80'
-    computes = [c/4 for c in computes] # P100
-    nnodes = [4, 8, 16, 32, 64, 80]
+    pfn = '/media/sf_Shared_Data/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/%s/tmp8commp100%s.log' % (name.lower(), name.lower())
+    val_sizes, computes = read_p100_log(pfn)
+    print('computes: ', np.sum(computes))
+    print('computes: ', computes)
+    assert len(computes) == len(sizes)
+
+    nnodes = [4, 8, 16, 32, 64]
+    #nnodes = [2, 4, 8]
     wfbps = []
     gmwfbps = []
     synceasgds = []
@@ -422,7 +345,7 @@ def gmwfbp_speedup():
         gmwfbp = sim.gmwfbp2()
         gmwfbps.append(b*num_of_nodes/(gmwfbp+tf)/single)
         tc = time_of_allreduce(num_of_nodes, total_size, B)/1000
-        print('tc: ', tc) 
+        print('#nodes:', num_of_nodes, ', tc: ', tc) 
         synceasgd = tb + tf + tc
         synceasgds.append(b*num_of_nodes/synceasgd/single)
         optimal.append(num_of_nodes)
@@ -432,11 +355,111 @@ def gmwfbp_speedup():
     print('wfbp: ', wfbps)
     print('gmwfbps: ', gmwfbps)
     print('synceasgds: ', synceasgds)
-    plt.plot(nnodes, optimal, color='k', marker='s', label='Linear')
-    plt.plot(nnodes, wfbps, color='r', marker='d', label='WFBP')
-    plt.plot(nnodes, synceasgds, color='b', marker='o', label='SyncEASGD')
-    plt.plot(nnodes, gmwfbps, color='g', marker='^', label='MG-WFBP')
-    print(np.array(gmwfbps)/np.array(synceasgds))
+    print('compared to synceasgds: ', np.array(gmwfbps)/np.array(synceasgds))
+    print('compared to wfbps: ', np.array(gmwfbps)/np.array(wfbps))
+    fig, ax = plt.subplots(figsize=(5,4.5))
+    ax.plot(nnodes, optimal, color='k', marker='s', label='Linear')
+    ax.plot(nnodes, wfbps, color='r', marker='d', label='WFBP')
+    ax.plot(nnodes, synceasgds, color='b', marker='o', label='SyncEASGD')
+    ax.plot(nnodes, gmwfbps, color='g', marker='^', label='MG-WFBP')
+    plt.legend(loc=2)
+    plt.xlabel('# of nodes')
+    plt.ylabel('Speedup')
+    #plt.title('%s-Simulation'%name)
+    #plt.yscale('log', basey=2)
+    #plt.xscale('log', basey=2)
+    plt.ylim(bottom=1,top=nnodes[-1]+1)
+    plt.xlim(left=1, right=nnodes[-1]+1)
+    plt.xticks(nnodes)
+    plt.yticks(nnodes)
+    plt.grid(color='#5e5c5c', linestyle='-.', linewidth=1)
+    update_fontsize(ax, fontsize=14)
+    plt.subplots_adjust(left=0.13, bottom=0.13, top=0.96, right=0.97)
+    plt.savefig('%s/speedup%s.pdf' % (OUTPUT_PATH, name.lower()+device))
+    #plt.show()
+
+def plot_realdata_comm(datas, configs):
+    def calculate_real_comms(data, bs):
+        times = [bs/((d/2)/2**(i-1)) for i, d in enumerate(data)]
+        comp = times[0]
+        comms = [t-times[0] for t in times[1:]]
+        return comp, comms
+    fig, ax = plt.subplots(figsize=(4.8,3.4))
+    count = len(datas[0][1:])
+    ind = np.arange(count)
+    width = 0.25
+    s = -int(count/2)
+    print('s: ', s)
+    margin = 0.05
+    xticklabels = [str(2**(i+1)) for i in range(count)]
+    s = (1 - (width*count+(count-1) *margin))/2+width
+    ind = np.array([s+i+1 for i in range(count)])
+    centerind = None
+    labels=['WF.', 'S.E.', 'M.W.']
+    for i, data in enumerate(datas):
+        comp, comms= calculate_real_comms(data, configs[1])
+        comps = [comp for j in comms]
+        newind = ind+s*width+(s+1)*margin
+        p1 = ax.bar(newind, comps, width, color=Color.comp_color,hatch='x', label='Comp.')
+        p2 = ax.bar(newind, comms, width,
+                             bottom=comps, color=Color.comm_color, label='Comm.')
+
+        s += 1 
+        autolabel(p2, ax, labels[i], 0)
+        print('comp: ', comp)
+        print('comms: ', comms)
+        print('')
+
+    rects = ax.patches
+    ax.text(10, 10, 'ehhlo', color='b')
+    handles, labels = ax.get_legend_handles_labels()
+    #ax.legend([handles[0][0]], [labels[0][0]], ncol=2)
+    print(labels)
+    print(handles)
+    ax.set_xlim(left=1+0.3)
+    ax.set_ylim(top=ax.get_ylim()[1]*1.3)
+    ax.set_xticks(ind+2*(width+margin))
+    ax.set_xticklabels(xticklabels)
+    ax.set_xlabel('# of nodes')
+    ax.set_ylabel('Time [s]')
+    update_fontsize(ax, 14)
+    ax.legend((p1[0], p2[0]), (labels[0],labels[1] ), ncol=2, handletextpad=0.2, columnspacing =1.)
+    fig.subplots_adjust(left=0.16, right=0.96, bottom=0.17, top=0.94)
+    plt.savefig('%s/comm%sreal.pdf' % (OUTPUT_PATH, configs[0].lower()))
+    #plt.show()
+
+
+
+def realdata_speedup():
+    configs = ['GoogleNet', 64]
+    wfbps =     [81.68*2, 74.83*2*2, 74.91*2*4, 2*62.9*8]
+    gmwfbps =   [81.68*2, 79.02*2*2, 75.03*2*4, 2*75.68*8]
+    synceasgds =[81.68*2, 62.57*2*2, 57.67*2*4, 2*55.58*8]
+    device = 'k80'
+    configs = ['ResNet', 32]
+    wfbps =     [76.85, 75.55*2, 73.679*4, 58.2*8]
+    gmwfbps =   [76.85, 75.59*2, 73.8*4, 70.8251*8]
+    synceasgds =[76.85, 60.0*2, 55.7*4, 50.8*8]
+    datas = [wfbps, synceasgds, gmwfbps]
+    #plot_realdata_comm(datas, configs)
+    #return
+
+    #configs = ['DenseNet', 128]
+    name = configs[0] 
+    b = configs[1]
+    nnodes = [2, 4, 8]
+
+    fig, ax = plt.subplots(figsize=(5,4.5))
+    optimal = nnodes 
+    wfbps = [i/wfbps[0] for i in wfbps[1:]]
+    gmwfbps = [i/gmwfbps[0] for i in gmwfbps[1:]]
+    synceasgds= [i/synceasgds[0] for i in synceasgds[1:]]
+    print('compared to wfbp: ', np.array(gmwfbps)/np.array(wfbps))
+    print('compared to synceasgds: ', np.array(gmwfbps)/np.array(synceasgds))
+    ax.plot(nnodes, optimal, color='k', marker='s', label='Linear')
+    ax.plot(nnodes, wfbps, color='r', marker='d', label='WFBP')
+    ax.plot(nnodes, synceasgds, color='b', marker='o', label='SyncEASGD')
+    ax.plot(nnodes, gmwfbps, color='g', marker='^', label='MG-WFBP')
     #plt.yscale('log', basey=2)
     #plt.xscale('log', basey=2)
     plt.legend(loc=2)
@@ -444,9 +467,31 @@ def gmwfbp_speedup():
     plt.ylabel('Speedup')
     plt.xticks(nnodes)
     plt.yticks(nnodes)
+    plt.ylim(bottom=1,top=nnodes[-1]+1)
+    plt.xlim(left=1, right=nnodes[-1]+1)
     plt.grid(color='#5e5c5c', linestyle='-.', linewidth=1)
-    plt.savefig('%s/speedup%s.pdf' % (OUTPUT_PATH, name.lower()+device))
+    #plt.title('%s-Realworld'%name)
+    update_fontsize(ax, fontsize=14)
+    plt.subplots_adjust(left=0.13, bottom=0.13, top=0.96, right=0.97)
+    plt.savefig('%s/speedup%sreal.pdf' % (OUTPUT_PATH, name.lower()+device))
     #plt.show()
+
+def parse_real_comm_cost():
+    configs = ['GoogleNet', 'gm'] #SyncEASGD
+    name = configs[0]
+    t = configs[1] 
+    nnodes = [2, 4, 8]
+    ncomms = []
+    for n in nnodes:
+        test_file = '/home/shshi/gpuhome/repositories/dpBenchmark/tools/caffe/cnn/%s/%s%dcomm.log' % (name.lower(), t, n)
+        sizes, comms, computes, merged_comms = read_log(test_file)
+        ncomms.append(np.sum(merged_comms))
+    print('network: ', name, ', type: ', t)
+    print('ncomms: ', ncomms)
+
+
+def speedup_with_r_and_n(r, n):
+    return n/(1.+r)
 
 def draw_ssgd_speedup():
     Ns = [8, 16, 32, 64]
@@ -464,7 +509,9 @@ if __name__ == '__main__':
     #test_file = '../logdata/allreduce%d.log' % num_of_nodes 
     #test_file = '/media/sf_Shared_Data/gpuhome/repositories/mpibench/allgather%d.log' % num_of_nodes 
     #plot_all_communication_overheads()
-    gmwfbp_simulate()
-    #gmwfbp_speedup()
+    #gmwfbp_simulate()
+    #realdata_speedup()
+    #parse_real_comm_cost()
+    gmwfbp_speedup()
     #draw_ssgd_speedup()
 

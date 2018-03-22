@@ -5,6 +5,7 @@
 //#ifdef USE_MPI
 #include <mpi.h> 
 //#endif
+#include <algorithm>    // std::max
 
 namespace caffe {
 
@@ -120,6 +121,7 @@ void DistManager::print_overheads() {
 
 void DistManager::merge_overheads() {
     //if (rank() == 0) {
+        LOG(INFO) << "in merge_overheads.";
         Overhead *overhead0 = overheads_[0];
         start_param_map_[overhead0->param_id_] = overhead0->param_id_;
         for (int i = 1; i < overheads_.size(); i++) {
@@ -145,7 +147,6 @@ void DistManager::merge_overheads() {
             }
         }
         std::reverse(overheads_.begin(), overheads_.end());
-
         print_overheads();
     //}
 }
@@ -193,80 +194,100 @@ int DistManager::search_index(int startIdx, vector<Overhead *>& overheads)
     return -1; // Case 3, which needs to merge gradients.
 }
 
+void DistManager::comm_start(const vector<double> &tc, const vector<double> &tb, const vector<double> &taub, int L, vector<double> &tauc)
+{
+    tauc[L-1] = taub[L-1]+tb[L-1];
+    for (int l = L-2; l >= 0; l--) {
+        tauc[l] = std::max(tauc[l+1]+tc[l+1], taub[l]+tb[l]);
+    }
+}
+#define alpha_p 20.
+//#define alpha_p 6.25 
+double DistManager::allreduce_time(size_t size)
+{
+    double alpha = alpha_p*nranks_;
+    double beta = 8/(10.*1e9);
+    double gamma = 0.;
+    int n = nranks_;
+    size = size * 4;
+    double comm = 2*n*alpha + 2*(n-1)*size*beta/n + (n-1)*size*gamma/n;
+    return comm;
+}
+
 void DistManager::generate_merged_param()
 {
     merge_overheads();
-    for (int i = 0; i < overheads_.size()-1;) {
-        int merged_idx = search_index(i, overheads_);
-        if (merged_idx >= 0) {
-            LOG(INFO) << "Found Case 1 or Case 2! Merged_idx: " << merged_idx;
-            for (int j = i; j <= merged_idx; j++) {
-                merged_param_->push_param_id(overheads_[j]->param_id_, -1, overheads_[j]->size_);
-            }
-            i = merged_idx + 1;
-        } else {
-            // Need to merge here
-            double merged_comm = overheads_[i]->communication_time_;
-            size_t sum_size = overheads_[i]->size_;
-            double sum_comp = overheads_[i+1]->compute_time_;
-            bool hidden_found = false;
-            int j;
-            for (j = i+1; j < overheads_.size() - 1; j++) {
-                Overhead* overhead = overheads_[j];
-                Overhead* overhead2 = overheads_[j+1];
-                double comp = overhead2->compute_time_;
-                size_t size = overhead->size_;
-                sum_size += size;
-                double predict_comm = predict_comm_time(sum_size, nranks_);
-                LOG(INFO) << "predict_comm: " << predict_comm << ", comm: " << overhead->communication_time_;
-                merged_comm = predict_comm + sum_comp;
-                sum_comp += comp;
-                if (merged_comm <= sum_comp) {
-                    // Can be hidded after merged
-                    hidden_found = true;
-                    break;
-                }
-            }
-            if (hidden_found) {
-                // Case 3
-                LOG(INFO) << "Found Case 3! Param_id: " << overheads_[i]->param_id_;
-                merged_param_->push_param_id(overheads_[i]->param_id_, -1, overheads_[i]->size_);
-                for (int k = i+1; k <= j; k++) {
-                    merged_param_->push_param_id(overheads_[k]->param_id_, 1, overheads_[k]->size_);
-                }
-            } else {
-                // Case 4
-                LOG(INFO) << "Found Case 4! Param_id: " << overheads_[i]->param_id_;
-                sum_size = overheads_[i]->size_;
-                merged_param_->push_param_id(overheads_[i]->param_id_, -1, overheads_[i]->size_);
-                double sum_comm = overheads_[i]->communication_time_;
-                sum_comp = overheads_[i+1]->compute_time_;
-                for (j = i+1; j < overheads_.size()-1; j++) {
-                    Overhead* overhead = overheads_[j];
-                    Overhead* overhead2 = overheads_[j+1];
-                    double comm = overhead->communication_time_;
-                    double comp = overhead2->compute_time_;
-                    size_t size = overhead->size_;
-                    sum_size += size;
-                    sum_comm += comm;
-                    double predict_comm = predict_comm_time(sum_size * 4, nranks_);
-                    LOG(INFO) << "predict_comm: " << predict_comm << ", sum_comp: " << sum_comp << ", sum_comm: " << sum_comm; 
-                    if (sum_comp + predict_comm > sum_comm) {
-                        j--;
-                        break;
-                    } else {
-                        merged_param_->push_param_id(overheads_[j]->param_id_, 1, overheads_[j]->size_);
-                    }
-                    sum_comp += comp;
-                }
-            }
-            i = j+1;
+    vector<int> param_ids;
+    vector<double> tb;
+    vector<double> tc;
+    vector<size_t> p; 
+    ///2*n*alpha + 2*(n-1)*M*beta/n + (n-1)*M*gamma/n
+    double alpha = alpha_p*nranks_;
+    for (int i = 0; i < overheads_.size(); i++) {
+        Overhead *o = overheads_[i];
+        if (o->compute_time_ > 0) {
+            tb.push_back(o->compute_time_);
+            p.push_back(o->size_);
+            double comm = allreduce_time(o->size_);
+            tc.push_back(comm);
+            param_ids.push_back(o->param_id_);
         }
     }
-    //if (rank() == 0) {
+    int L = tb.size(); 
+    vector<double> taub(L);
+    vector<double> tauc(L);
+    double tf = 0.0;
+    taub[L-1] = tf;
+    for (int l = L-2; l>=0; l--) {
+        taub[l] = taub[l+1] + tb[l+1];
+    }
+    // calculate tauc
+    comm_start(tc, tb, taub, L, tauc);
+    for (int l = L-1; l >= 1; l--) {
+        double tmp = 0.0;
+        if (l > 1) {
+            tmp = taub[l-2];
+        } else {
+            tmp = taub[0]+tb[0];
+        }
+        if (tmp - tauc[l] < 2*nranks_ * alpha) {
+            // MERGE here
+            tc[l] = 0.0;
+            p[l-1] = p[l-1]+p[l];
+            tc[l-1] = allreduce_time(p[l-1]);
+            comm_start(tc, tb, taub, L, tauc);
+            M_.insert(param_ids[l]);
+        }
+    }
+    if (rank() == 0) {
         LOG(INFO) << "=============== " << rank() << " ============";
         merged_param_->print();
-    //}
+
+    }
+    count_ = M_.size();
+    MPI_Bcast(&count_, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    int *M = new int[count_];
+    int i = 0;
+    if (rank() == 0) {
+        for (auto m:M_) {
+            M[i++] = m;
+        }
+    }
+    // Bcast to other mpi processes.
+    MPI_Bcast(M, count_, MPI_INT, 0, MPI_COMM_WORLD);
+    if (rank() != 0) {
+        for (i = 0; i < count_; i++) {
+            M_.insert(M[i]);
+        }
+    }
+    //delete M;
+    LOG(INFO) << "=============== M at rank(): " << rank() << "============";
+    for(auto m : M_) {
+        LOG(INFO) << m;
+    } 
+
+    //std::reverse(overheads_.begin(), overheads_.end());
+    print_overheads();
 }
 
 void DistManager::GetReduceBucketId(int type_id, int &id_from, size_t &count)
@@ -301,15 +322,30 @@ void DistManager::GetReduceBucketId(int type_id, int &id_from, size_t &count)
         count = cnt;
         id_from = param_id;
     } else {
+
         //if ((benchmark_ && cnt > 0) || cnt > 8192*16) { // GoogleNet
         //if ((benchmark_ && cnt > 0) || cnt > 8192*2) { // ResNet ??
         //if ((benchmark_ && cnt > 0) || cnt > 1e5) { // VGG
-        if ((benchmark_ && cnt > 0) || (!benchmark_ && cnt > 8192*32 && param_id > 25) || (!benchmark_&&param_id == 0 && cnt>0)) { // VGG special case
-            count = cnt;
-            id_from = param_id;
+        //if ((benchmark_ && cnt > 0) || (!benchmark_ && cnt > 8192*32 && param_id > 25) || (!benchmark_&&param_id == 0 && cnt>0)) { // VGG special case
+        if (benchmark_) {
+            if (cnt > 0) {
+                count = cnt;
+                id_from = param_id;
+            } else {
+                count = 0;
+                id_from = Net::HOLD_ON_REDUCE;
+            }
         } else {
-            count = 0;
-            id_from = Net::HOLD_ON_REDUCE;
+            int tmp_param_id = start_param_map_[param_id];
+            if (M_.count(tmp_param_id) == 0 && cnt > 0) {
+            //if (param_id== 0 && cnt > 0) { // SyncEASGD
+            //if (cnt > 8192*16) {
+                count = cnt;
+                id_from = param_id;
+            } else {
+                count = 0;
+                id_from = Net::HOLD_ON_REDUCE;
+            }
         }
     }
 }
@@ -322,7 +358,7 @@ void DistManager::ParamIdPushed(int type_id, const int param_id, int inner_rank,
             Overhead *overhead = overheads_[param_id_indexes_[param_id]];
             overhead->set_compute_time(time);
         }
-        LOG(INFO) << "ParamIdPushed: " << " type_id: " << type_id << ", param_id: " << param_id << ", inner_rank: " << inner_rank;
+        //LOG(INFO) << "ParamIdPushed: " << " type_id: " << type_id << ", param_id: " << param_id << ", inner_rank: " << inner_rank;
     }
 }
 
@@ -401,8 +437,10 @@ void DistManager::ReduceLoop(int type_id)
             iter_++;
             if (benchmark_ && iter_ > 3) {
                 //print_overheads();
+                if (gradients_merged_) {
+                    generate_merged_param();
+                }
                 benchmark_ = false;
-                //generate_merged_param();
             }
 
             for (int i = 0; i < solvers_.size(); ++i) {
@@ -421,8 +459,7 @@ void DistManager::ReduceLoop(int type_id)
         }
         au_ids_.clear();
     }
-    //print_overheads();
-    generate_merged_param();
+    print_overheads();
 }
 
 
