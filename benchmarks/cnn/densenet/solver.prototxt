@@ -1,0 +1,17 @@
+train_net: "DenseNet_121.prototxt"
+test_net: "DenseNet_121_test.prototxt"
+test_iter: 200
+test_interval: 800
+base_lr: 0.1
+display: 1
+max_iter: 100 
+lr_policy: "multistep"
+gamma: 0.1
+momentum: 0.9
+weight_decay: 0.0001
+solver_mode: GPU
+random_seed: 831486
+stepvalue: 115000
+stepvalue: 172500
+type: "SGD"
+gradients_merged: true 

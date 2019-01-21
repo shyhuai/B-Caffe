@@ -368,15 +368,15 @@ void DistManager::ReduceLoop(int type_id)
 
     LOG(INFO) << "Reduce loop started...";
     while(1) {
-        LOG(INFO) << "At reduce looping...";
+        //LOG(INFO) << "At reduce looping...";
         int id_from;
         size_t count;
         GetReduceBucketId(type_id, id_from, count);
-        LOG(INFO) << "Fetched id_from: " << id_from << ", count: " << count; 
+        //LOG(INFO) << "Fetched id_from: " << id_from << ", count: " << count; 
         if (id_from == Net::HOLD_ON_REDUCE)  {
             continue;
         }         
-        LOG(INFO) << "Prepare to reduce..., solver size: " << solvers_.size() << ", au_ids size: " << au_ids_.size();
+        //LOG(INFO) << "Prepare to reduce..., solver size: " << solvers_.size() << ", au_ids size: " << au_ids_.size();
         int real_id_from = id_from;
         if (id_from == Net::END_OF_TRAIN) {
             for (int i = 0; i < solvers_.size(); ++i) {
@@ -390,17 +390,17 @@ void DistManager::ReduceLoop(int type_id)
             real_id_from = au_ids_.back();
         }
         if (real_id_from >= 0) {
-            LOG(INFO) << "real_id_from: " << real_id_from; 
+            //LOG(INFO) << "real_id_from: " << real_id_from; 
             for (int i = 0; i < solvers_.size(); ++i) {
                 BlockingQueue<std::pair<int, size_t>>* nq = notify_queues_[i];
                 nq->push(std::make_pair(real_id_from, count));
             }
             // 1. Start to reduce
             // 1.1 Wait all GPUs finished
-            LOG(INFO) << "Waiting for all threads NCCL Allreduce...";
+            //LOG(INFO) << "Waiting for all threads NCCL Allreduce...";
             semaphore_->WaitAll();
 
-            LOG(INFO) << "Start to copy from GPU to CPU";
+            //LOG(INFO) << "Start to copy from GPU to CPU";
             // 2. Copy from GPU0 (root_solver) to CPU
             allreduce_timer_.Start();
             CUDA_CHECK(cudaSetDevice(gpus_[0]));
@@ -412,11 +412,11 @@ void DistManager::ReduceLoop(int type_id)
 
             // 4. Update model
             // learnable_params_[id_from]->diff_type()
-            LOG(INFO) << "Update model in the cpu side";
+            //LOG(INFO) << "Update model in the cpu side";
             Tensor::cpu_scal(count, root_solver_->net()->learnable_params()[real_id_from]->diff_type(), learnable_params_cpu_out_, 1.F / (Caffe::solver_count() * root_solver_->net()->global_grad_scale() * nranks_));
 
             // 5. Copy back from CPU to GPU0,1,...
-            LOG(INFO) << "Copy back from CPU to GPU0,1,... real_id_from: " << real_id_from;
+            //LOG(INFO) << "Copy back from CPU to GPU0,1,... real_id_from: " << real_id_from;
             for (int i = 0; i < solvers_.size(); ++i) {
                 const shared_ptr<Solver> solver = solvers_[i];
                 int gpu_id = gpus_[i];

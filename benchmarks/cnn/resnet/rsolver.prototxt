@@ -1,0 +1,22 @@
+# The train/test net protocol buffer definition
+net: "resnet-b128.prototxt"
+base_lr: 0.01
+
+#lr_policy: "inv"
+lr_policy: "fixed"
+#gamma: 0.0001
+#power: 0.75
+type: "SGD"
+momentum: 0.9
+weight_decay: 0.0001
+
+max_iter: 40
+display: 1
+solver_mode: GPU 
+
+# covering the full 10,000 testing images.
+test_iter: 100
+# Carry out testing every 500 training iterations.
+test_interval: 391
+gradients_merged: true
+#gradients_merged: false

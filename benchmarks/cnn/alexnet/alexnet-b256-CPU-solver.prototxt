@@ -1,0 +1,14 @@
+# The train/test net protocol buffer definition
+net: "alexnet-b256.prototxt"
+base_lr: 0.001
+
+lr_policy: "fixed"
+max_iter: 7840 
+display: 1
+solver_mode: CPU 
+momentum: 0.9
+
+# covering the full 10,000 testing images.
+test_iter: 100
+# Carry out testing every 2 training epochs.
+test_interval: 392 

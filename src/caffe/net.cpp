@@ -926,7 +926,7 @@ void Net::ReduceAndUpdateDist(int type_id) {
       const std::pair<int, size_t>& param = dist_queue_->pop();
       int id_from = param.first;
       size_t count = param.second;
-      LOG(INFO) << "Reading from queue, id_from: " << id_from << ", count: " << count;
+      //LOG(INFO) << "Reading from queue, id_from: " << id_from << ", count: " << count;
       if (id_from == HOLD_ON_REDUCE) {
           continue;
       } else if (id_from == END_OF_TRAIN) {
@@ -990,7 +990,7 @@ void Net::Reduce(int type_id, int param_id) {
 }
 
 void Net::ReduceBucket(int type_id, size_t count, Type bucket_type, void* bucket) {
-  LOG(INFO) << "ReduceBucket with NCCL: " << solver_rank_;
+  //LOG(INFO) << "ReduceBucket with NCCL: " << solver_rank_;
   Solver::Callback* cb = solver_->callback();
   cb->reduce_barrier(type_id);
   {
@@ -1004,7 +1004,7 @@ void Net::ReduceBucket(int type_id, size_t count, Type bucket_type, void* bucket
   }
   //Tensor::gpu_scal(count, bucket_type, bucket, 1.F / (Caffe::solver_count() * global_grad_scale()),
   //    Caffe::cublas_handle());
-  LOG(INFO) << "NCCL allreduce finised: " << solver_rank_;
+  //LOG(INFO) << "NCCL allreduce finised: " << solver_rank_;
 }
 #endif
 
